@@ -43,6 +43,54 @@ export const zitadel = {
     if (!result.authRequest) throw new AuthError("登录请求已失效，请从应用重新发起登录。");
     return result.authRequest;
   },
+  async canSkipConsent(clientId: string) {
+    if (!clientId) return false;
+    const config = getConfig();
+    // Only an exact OIDC client ID found inside an explicitly trusted project
+    // can bypass the confirmation screen. Any lookup failure fails closed.
+    for (const projectId of config.skipConsentProjectIds) {
+      try {
+        let offset = 0n;
+        for (;;) {
+          const page = await getClients().management.listApps({ projectId, query: { offset, limit: 100, asc: false }, queries: [] });
+          if (page.result.some(app => app.config.case === "oidcConfig" && app.config.value.clientId === clientId)) return true;
+          const next = offset + BigInt(page.result.length);
+          if (!page.result.length || next <= offset || next >= (page.details?.totalResult ?? BigInt(page.result.length))) break;
+          offset = next;
+        }
+      } catch {
+        // An unreadable or removed project must never silently grant an exemption.
+      }
+    }
+    return false;
+  },
+  async applicationName(clientId: string) {
+    if (!clientId) return "";
+    try {
+      let projectOffset = 0n;
+      for (;;) {
+        const projects = await getClients().management.listProjects({ query: { offset: projectOffset, limit: 100, asc: false }, queries: [] });
+        for (const project of projects.result) {
+          let appOffset = 0n;
+          for (;;) {
+            const apps = await getClients().management.listApps({ projectId: project.id, query: { offset: appOffset, limit: 100, asc: false }, queries: [] });
+            const match = apps.result.find(app => app.config.case === "oidcConfig" && app.config.value.clientId === clientId);
+            if (match?.name.trim()) return match.name.trim();
+            const next = appOffset + BigInt(apps.result.length);
+            if (!apps.result.length || next <= appOffset || next >= (apps.details?.totalResult ?? BigInt(apps.result.length))) break;
+            appOffset = next;
+          }
+        }
+        const next = projectOffset + BigInt(projects.result.length);
+        if (!projects.result.length || next <= projectOffset || next >= (projects.details?.totalResult ?? BigInt(projects.result.length))) break;
+        projectOffset = next;
+      }
+    } catch {
+      // The redirect host remains a useful display fallback when this service
+      // account cannot inspect an application or project.
+    }
+    return "";
+  },
   async organizationForAuth(authRequestId?: string) {
     if (!authRequestId) return getConfig().organizationId;
     const request = await this.authRequest(authRequestId);

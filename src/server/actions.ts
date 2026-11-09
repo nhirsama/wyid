@@ -1,21 +1,73 @@
 "use server";
 
 import { z } from "zod";
-import { factorSchema, forgotPasswordSchema, loginSchema, loginNameSchema, passwordMeetsPolicy, registerSchema, resetPasswordSchema, verifyEmailSchema, verifyTotpSchema, type ActionResult, type AuthContext, type ChallengeResult, type Factor } from "@/lib/auth";
+import { authLink, factorSchema, forgotPasswordSchema, loginSchema, loginNameSchema, passwordMeetsPolicy, registerSchema, resetPasswordSchema, verifyEmailSchema, verifyTotpSchema, type ActionResult, type AuthContext, type ChallengeResult, type Factor } from "@/lib/auth";
 import { AuthError, actionError } from "./errors";
 import { clearAuthenticatedSession, clearPendingSession, readAuthenticatedSession, readPendingSession, writeAuthenticatedSession, writePendingSession, type PendingSession } from "./session";
 import { getConfig } from "./config";
 import { zitadel } from "./zitadel/service";
 import { ErrorReason, Prompt } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
 import { redirect } from "next/navigation";
+import { consentToken, matchesConsentToken } from "./consent";
 
 const contextSchema = z.object({ authRequestId: z.string().min(1).max(1024).optional(), userId: z.string().min(1).max(1024).optional() });
 function context(raw: AuthContext) { return contextSchema.parse(raw); }
-async function finish(session: PendingSession): Promise<ActionResult> {
+async function finish(session: PendingSession, factorVerified = false): Promise<ActionResult> {
   if (!session.authRequestId) throw new AuthError("登录会话缺少授权请求。");
+  const request = await zitadel.authRequest(session.authRequestId);
+  if (request.prompt.includes(Prompt.NONE)) {
+    const callback = await zitadel.deny(request.id, ErrorReason.CONSENT_REQUIRED);
+    await clearPendingSession();
+    return { ok: true, redirect: callback };
+  }
+  const needsConsent = request.prompt.includes(Prompt.CONSENT) || !await zitadel.canSkipConsent(request.clientId);
+  if (needsConsent) {
+    const current = await zitadel.session(session);
+    const userId = session.userId || current.factors?.user?.id;
+    if (!userId) throw new AuthError("登录会话中没有账号信息，请重新登录。");
+    await writePendingSession({ ...session, authRequestId: request.id, methods: [], userId, factorVerified });
+    return { ok: true, redirect: authLink("/consent", { authRequestId: request.id }) };
+  }
   const redirect = await zitadel.callback(session.authRequestId, { sessionId: session.sessionId, sessionToken: session.sessionToken });
   await clearPendingSession();
   return { ok: true, redirect };
+}
+
+export async function decideConsent(raw: unknown): Promise<ActionResult> {
+  try {
+    const input = z.object({ authRequestId: z.string().min(1).max(1024), consentToken: z.string().min(1).max(128), allow: z.boolean() }).parse(raw);
+    const pending = await readPendingSession();
+    if (!pending || pending.authRequestId !== input.authRequestId || !pending.sessionId || !pending.sessionToken || !pending.userId) {
+      throw new AuthError("授权会话已过期，请返回应用重新登录。");
+    }
+    const request = await zitadel.authRequest(input.authRequestId);
+    if (request.prompt.includes(Prompt.NONE)) {
+      const callback = await zitadel.deny(request.id, ErrorReason.CONSENT_REQUIRED);
+      await clearPendingSession();
+      return { ok: true, redirect: callback };
+    }
+    const expected = consentToken(request, pending, getConfig().sessionSecret);
+    if (!matchesConsentToken(expected, input.consentToken)) throw new AuthError("授权请求或登录账号已变化，请重新确认。");
+    const current = await zitadel.session(pending);
+    if (current.factors?.user?.id !== pending.userId) throw new AuthError("登录账号已变化，请重新登录后继续。");
+    const organizationId = await zitadel.organizationForUser(pending.userId);
+    const policy = await zitadel.policy(organizationId);
+    const isLocalLogin = Boolean(current.factors.password || current.factors.webAuthN);
+    const requiresMfa = policy.forceMfa && (!policy.forceMfaLocalOnly || isLocalLogin);
+    if (input.allow && requiresMfa && !pending.factorVerified) {
+      const configured = await zitadel.methods(pending.userId);
+      const allowed = configured.filter(method => policy.factors.includes(method));
+      const needsEnrollment = allowed.length === 0 && policy.factors.includes("totp");
+      if (!allowed.length && !needsEnrollment) throw new AuthError("账号策略要求额外验证，但没有可用的已登记验证方式。请联系账号管理员。");
+      await writePendingSession({ ...pending, methods: needsEnrollment ? ["totp"] : allowed, ...(needsEnrollment ? { needsEnrollment: true } : {}) });
+      return { ok: true, redirect: authLink("/verify", { authRequestId: request.id }) };
+    }
+    const callback = input.allow
+      ? await zitadel.callback(request.id, { sessionId: pending.sessionId, sessionToken: pending.sessionToken })
+      : await zitadel.deny(request.id, ErrorReason.ACCESS_DENIED);
+    await clearPendingSession();
+    return { ok: true, redirect: callback };
+  } catch (error) { return actionError(error); }
 }
 function pendingFor(input: { authRequestId?: string; sessionId: string; sessionToken: string }, methods: Factor[], userId: string): PendingSession {
   return { ...input, methods, userId };
@@ -41,7 +93,7 @@ async function finishOrFactor(input: { authRequestId?: string; sessionId: string
     await clearPendingSession();
     return { ok: true, redirect: "/account" };
   }
-  try { return await finish(input); }
+  try { return await finish(input, factorVerified); }
   catch (error) {
     const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
     if (code !== 9) throw error;
@@ -91,7 +143,7 @@ export async function finishPasskey(raw: unknown, rawContext: AuthContext): Prom
     const ctx = context(rawContext); const session = await readPendingSession();
     if (!session || session.authRequestId !== ctx.authRequestId) throw new AuthError("通行密钥登录已过期，请重新开始。");
     const result = await zitadel.verifyWebAuthn(session, assertion as never);
-    return await finishOrFactor({ ...session, ...result }, session.methods, session.userId);
+    return await finishOrFactor({ ...session, ...result }, session.methods, session.userId, Boolean(session.methods?.includes("u2f")));
   } catch (error) { return actionError(error); }
 }
 export async function verifyFactor(raw: unknown, rawContext: AuthContext): Promise<ActionResult> {

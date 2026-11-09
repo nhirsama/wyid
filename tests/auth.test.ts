@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { authContext, authLink, loginSchema, passwordMeetsPolicy, registerSchema, resetPasswordSchema, verifyTotpSchema } from "@/lib/auth";
+import { consentScopes } from "@/lib/consent";
 const passwordPolicy = { minLength: 10, uppercase: true, lowercase: true, number: true, symbol: true };
 describe("form contracts", () => {
   it("trims login names without altering passwords", () => {
@@ -33,5 +34,14 @@ describe("authorization navigation", () => {
   it("does not forward arbitrary redirects or repeated query values", () => {
     const context = authContext({ returnTo: "https://example.org", sessionToken: "secret", authRequest: ["one", "two"] });
     expect(authLink("/login", context)).toBe("/login");
+  });
+});
+describe("OAuth consent scopes", () => {
+  it("deduplicates known scopes and safely labels unknown scopes", () => {
+    expect(consentScopes(["openid", "profile", "custom:read", "openid"])).toEqual([
+      { scope: "openid", name: "账号标识", description: "用于在该网站识别你的账号。" },
+      { scope: "profile", name: "基本资料", description: "昵称、姓名、头像及其他基本资料。" },
+      { scope: "custom:read", name: "其他请求权限", description: "此网站请求的额外权限。" },
+    ]);
   });
 });

@@ -28,12 +28,13 @@ pnpm dev
 | `ZITADEL_SERVICE_USER_TOKEN_FILE` | 服务账号 PAT 文件路径；设置后优先于 `ZITADEL_SERVICE_TOKEN`，适用于挂载 Docker/Kubernetes Secret |
 | `SESSION_SECRET` | 至少 32 字符的独立随机密钥，用于 AES-GCM 加密会话数据；与 Cookie 的 `HttpOnly` 属性无关 |
 | `ZITADEL_ORGANIZATION_ID` | 可选默认组织；授权请求带有 `urn:zitadel:iam:org:id:` scope 时采用请求对应的组织策略 |
+| `ZITADEL_SKIP_CONSENT_PROJECT_IDS` | 可选免确认项目白名单，填写 ZITADEL Project ID，多个用逗号分隔；仅匹配这些项目中精确的 OIDC Client ID 才跳过授权确认 |
 | `SITE_NICKNAME` | 站点展示昵称 |
 | `SITE_ICON` | 站点图标的本站路径或 HTTP(S) 图片地址 |
 
 直接访问 `/login` 会建立 ZITADEL Session，并进入本站 `/account`；该站点以加密 HttpOnly Cookie 保存短期 Session 凭据，并在访问账号页时向 ZITADEL 校验 Session。也可以将 ZITADEL 的登录 UI 配置为本站：业务应用使用 OIDC Authorization Code + PKCE 流程时，本站从授权请求 ID 读取登录提示和请求上下文，并通过 ZITADEL 的 CreateCallback 继续授权。OIDC 回跳地址由 ZITADEL 决定，浏览器不可自行指定。
 
-令牌只在服务端使用。待完成验证的 Session ID、Session Token 与可用验证因素使用短期 AES-GCM 加密 HttpOnly Cookie 保存；OIDC 登录成功后由 ZITADEL 原生回调返回业务应用，直接登录则将 ZITADEL Session 凭据保存于加密 HttpOnly Cookie，并可从账号页退出以撤销该 Session。
+令牌只在服务端使用。待完成验证或 OAuth 授权确认的 Session ID、Session Token 与可用验证因素使用短期 AES-GCM 加密 HttpOnly Cookie 保存。OIDC 登录时展示应用名称、来源域名和请求权限，确认后才通过 ZITADEL 回调；直接登录则将 ZITADEL Session 凭据保存于加密 HttpOnly Cookie，并可从账号页退出以撤销该 Session。默认所有 OIDC 应用都显示授权确认；可按项目配置免确认白名单。白名单不会绕过密码、Passkey 或 MFA 验证，OIDC 请求显式带 `prompt=consent` 时仍始终要求确认；`prompt=none` 保持静默请求语义，不会显示交互页面。
 
 ### 部署到子路径
 

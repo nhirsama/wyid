@@ -80,6 +80,23 @@ h1, p { overflow-wrap: anywhere; }
 .centered { display: block; text-align: center; }
 .method-divider { display: flex; align-items: center; gap: 12px; margin: 21px 0 0; font-size: 12px; color: #8b99af; }
 .method-divider::before, .method-divider::after { content: ""; height: 1px; flex: 1; background: #edf0f6; }
+.account-choice { display: flex; align-items: center; gap: 12px; min-width: 0; border: 1px solid #e4eaf3; border-radius: 9px; padding: 13px 14px; background: #fff; color: #8da5c5; }
+.account-choice > span:last-child { flex: 1; min-width: 0; }
+.account-choice strong, .account-choice small { display: block; overflow-wrap: anywhere; }
+.account-choice strong { color: #5b759a; font-size: 15px; font-weight: 500; }
+.account-choice small { margin-top: 2px; color: #96a5bb; font-size: 13px; }
+.consent-avatar { display: grid; flex: 0 0 38px; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: #f1f6fd; color: #7694bc; }
+.consent-form { gap: 17px; }
+.consent-form > .body-copy { margin-bottom: -2px; }
+.consent-form > .account-choice { margin: 0; }
+.scope-list { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; color: #778ca9; font-size: 13px; line-height: 1.8; }
+.scope-list li { border-bottom: 1px solid #edf1f6; padding: 0 0 10px; overflow-wrap: anywhere; }
+.scope-list li:last-child { border-bottom: 0; padding-bottom: 0; }
+.scope-list strong { color: #5b759a; font-weight: 500; }
+.scope-list code { display: inline-block; margin-left: 3px; border-radius: 4px; padding: 1px 5px; background: #f4f6fa; color: #8998ad; font-family: var(--mono); font-size: 10px; overflow-wrap: anywhere; }
+.form-actions { display: flex; gap: 11px; }
+.form-actions > button { flex: 1; }
+.consent-actions { margin-top: 3px; }
 .auth-methods { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
 .flow-note { display: flex; gap: 8px; align-items: center; margin: -7px 0 23px; padding: 10px 12px; border: 1px solid #e0e9f5; border-radius: 8px; background: #f6f9fd; color: #6a85a9; font-size: 13px; }
 .notice { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 20px; border: 1px solid #dce6f4; border-radius: 8px; padding: 12px 14px; background: #f4f8fd; color: #6581a6; font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }

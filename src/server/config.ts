@@ -13,6 +13,7 @@ type ServerConfig = {
   organizationId?: string;
   externalDomain?: string;
   customRequestHeaders: Record<string, string>;
+  skipConsentProjectIds: string[];
 };
 
 function isOrigin(value: string, allowInternalHttp = false) {
@@ -86,6 +87,7 @@ export function getConfig() {
     token: z.string().min(1),
     sessionSecret: z.string().min(32),
     organizationId: z.string().optional(),
+    skipConsentProjectIds: z.array(z.string()),
   });
   const result = schema.safeParse({
     appUrl: process.env.APP_URL,
@@ -93,6 +95,7 @@ export function getConfig() {
     token: readServiceToken(),
     sessionSecret: process.env.SESSION_SECRET,
     organizationId: process.env.ZITADEL_ORGANIZATION_ID || undefined,
+    skipConsentProjectIds: [...new Set((process.env.ZITADEL_SKIP_CONSENT_PROJECT_IDS || "").split(",").map(id => id.trim()).filter(Boolean))],
   });
   if (!result.success) {
     const names: Record<string, string> = { appUrl: "APP_URL", apiUrl: "ZITADEL_API_URL", token: "ZITADEL_SERVICE_TOKEN or ZITADEL_SERVICE_USER_TOKEN_FILE", sessionSecret: "SESSION_SECRET", organizationId: "ZITADEL_ORGANIZATION_ID" };

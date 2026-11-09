@@ -63,6 +63,10 @@ describe("server configuration", () => {
     vi.stubEnv("CUSTOM_REQUEST_HEADERS", "Authorization:Bearer bad");
     expect(() => getConfig()).toThrow("CUSTOM_REQUEST_HEADERS");
   });
+  it("reads the optional consent-exempt project allowlist at runtime", () => {
+    vi.stubEnv("ZITADEL_SKIP_CONSENT_PROJECT_IDS", " project-a,project-b,project-a ,, ");
+    expect(getConfig().skipConsentProjectIds).toEqual(["project-a", "project-b"]);
+  });
   it("rejects paths, embedded credentials, query strings, and non-HTTP protocols", () => {
     for (const url of ["https://id.example.com/api", "https://user:password@id.example.com", "https://id.example.com/?token=test", "ftp://id.example.com"]) {
       vi.stubEnv("ZITADEL_API_URL", url); expect(() => getConfig()).toThrow(ConfigurationError);

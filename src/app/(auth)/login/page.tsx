@@ -14,9 +14,14 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const brand = getBrand();
   const request = context.authRequestId ? await zitadel.authRequest(context.authRequestId) : undefined;
   if (request?.prompt.includes(Prompt.NONE)) redirect(await zitadel.deny(request.id, ErrorReason.LOGIN_REQUIRED));
-  const policy = await zitadel.policy(await zitadel.organizationForAuth(context.authRequestId));
+  const [policy, registeredAppName] = await Promise.all([
+    zitadel.policy(await zitadel.organizationForAuth(context.authRequestId)),
+    request ? zitadel.applicationName(request.clientId) : Promise.resolve(""),
+  ]);
   const initialContext = { ...context, loginHint: context.loginHint || request?.loginHint };
-  return <AuthPanel title="登录账号" description={request ? "登录后将返回你正在访问的应用。" : `使用 ${brand.nickname} 登录。`}>
+  const appHost = request ? new URL(request.redirectUri).host : "";
+  const appName = registeredAppName || appHost;
+  return <AuthPanel title={`登录 ${brand.nickname}`} description={request ? <>继续登录 <strong>{appName}</strong>{appHost && appHost !== appName && <small className="app-host">{appHost}</small>}</> : "一个账号，连接你的网站。"}>
     {params.idpError === "1" && <Notice kind="error">身份提供方登录未完成，请重试或选择其他登录方式。</Notice>}
     <LoginForm context={initialContext} policy={policy} />
   </AuthPanel>;

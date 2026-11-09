@@ -1,4 +1,5 @@
 import { createServerTransport } from "@zitadel/client/node";
+import { createManagementServiceClient } from "@zitadel/client/v1";
 import { createOIDCServiceClient, createSessionServiceClient, createSettingsServiceClient, createUserServiceClient } from "@zitadel/client/v2";
 import { getConfig, zitadelRequestHeaders } from "@/server/config";
 
@@ -14,6 +15,7 @@ function createClients() {
     }],
   });
   return {
+    management: createManagementServiceClient(transport),
     session: createSessionServiceClient(transport), oidc: createOIDCServiceClient(transport),
     user: createUserServiceClient(transport), settings: createSettingsServiceClient(transport),
   };
