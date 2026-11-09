@@ -15,7 +15,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe.each(["", "/auth", "/account/login-ui"])("ZITADEL callback URLs with base path '%s'", basePath => {
-  beforeEach(() => vi.stubEnv("NEXT_PUBLIC_BASE_PATH", basePath));
+  beforeEach(() => vi.stubEnv("BASE_PATH", basePath || "/"));
 
   it("includes the base path in registration and resent verification emails", async () => {
     await zitadel.register({ givenName: "Test", familyName: "Account", email: "test@example.com", password: "password", confirmPassword: "password" }, undefined, "V2_a&b");

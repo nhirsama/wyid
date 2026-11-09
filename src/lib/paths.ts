@@ -10,12 +10,13 @@ export function normalizeBasePath(value?: string) {
   return normalized;
 }
 
-/**
- * Only for browser navigation, public assets and absolute URL construction.
- * Next.js Link and redirect() already add basePath: pass them app-relative paths.
- * External ZITADEL / identity-provider redirects must remain unchanged.
- */
-export function withBasePath(path: string, basePath = process.env.NEXT_PUBLIC_BASE_PATH || "") {
+/** Read once from the server process environment when the app starts. */
+export function runtimeBasePath() {
+  return normalizeBasePath(process.env.BASE_PATH);
+}
+
+/** Prefix app-owned browser/server URLs. External identity-provider redirects remain unchanged. */
+export function withBasePath(path: string, basePath = runtimeBasePath()) {
   if (!path.startsWith("/") || path.startsWith("//")) return path;
   return `${basePath}${path}`;
 }

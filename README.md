@@ -26,7 +26,7 @@ pnpm dev
 | `CUSTOM_REQUEST_HEADERS` | 可选的额外/覆盖 API 请求头，格式为 `Header:Value,Header:Value`；例如 `Host:id.example.com,X-Forwarded-Proto:https` |
 | `ZITADEL_SERVICE_TOKEN` | 服务账号 PAT；可直接填写，或使用下方文件变量挂载 |
 | `ZITADEL_SERVICE_USER_TOKEN_FILE` | 服务账号 PAT 文件路径；设置后优先于 `ZITADEL_SERVICE_TOKEN`，适用于挂载 Docker/Kubernetes Secret |
-| `SESSION_SECRET` | 至少 32 字符的独立随机密钥，用于加密待完成验证的 HttpOnly Cookie |
+| `SESSION_SECRET` | 至少 32 字符的独立随机密钥，用于 AES-GCM 加密会话数据；与 Cookie 的 `HttpOnly` 属性无关 |
 | `ZITADEL_ORGANIZATION_ID` | 可选默认组织；授权请求带有 `urn:zitadel:iam:org:id:` scope 时采用请求对应的组织策略 |
 | `SITE_NICKNAME` | 站点展示昵称 |
 | `SITE_ICON` | 站点图标的本站路径或 HTTP(S) 图片地址 |
@@ -44,11 +44,11 @@ BASE_PATH=/auth
 
 配置后入口为 `/auth/login`，账号页为 `/auth/account`。站内跳转、MFA、邮件验证和密码重置链接、身份提供方回调、静态资源均使用该前缀；ZITADEL 与外部业务应用的回跳地址保持原样。本地 `SITE_ICON=/icon.svg` 对应 `/auth/icon.svg`，无需手动重复填写前缀。
 
-`APP_URL` 仍只填写 Origin，不包含路径。未设置 `BASE_PATH` 或设为 `/` 时，行为与根路径部署一致。修改 `BASE_PATH` 后重启 `pnpm dev`；生产部署需重新执行 `pnpm build`，构建与运行使用相同配置。反向代理应将带完整前缀的请求转发给本站，不要剥离前缀；ZITADEL 中配置的登录 UI 和回调地址也应使用带前缀的公开地址。
+`APP_URL` 仍只填写 Origin，不包含路径。未设置 `BASE_PATH` 或设为 `/` 时，行为与根路径部署一致。`BASE_PATH` 在服务启动前从运行环境读取，改动后重启服务/容器即可，不需要重新构建镜像或 Next.js 产物。反向代理应将带完整前缀的请求转发给本站，不要剥离前缀；ZITADEL 中配置的登录 UI 和回调地址也应使用带前缀的公开地址。
 
 ## Docker / GHCR
 
-推送 Git tag（例如 `v1.2.3`）会自动构建并发布 `linux/amd64` 与 `linux/arm64` 镜像到 `ghcr.io/<owner>/<repository>`，并生成对应版本标签和 `latest` 标签。运行时通过环境变量或 `--env-file` 提供上述 ZITADEL 配置，不要将 `.env` 文件复制进镜像。`ZITADEL_API_URL` 可使用 Docker 网络中的服务地址，`ZITADEL_EXTERNALDOMAIN` 提供公开域名供 ZITADEL 识别实例；服务账号 PAT 可只读挂载到容器并由 `ZITADEL_SERVICE_USER_TOKEN_FILE` 指向。
+推送 Git tag（例如 `v1.2.3`）会自动构建并发布 `linux/amd64` 与 `linux/arm64` 镜像到 `ghcr.io/<owner>/<repository>`，并生成对应版本标签和 `latest` 标签。运行时通过环境变量或 `--env-file` 提供上述配置（包括 `BASE_PATH`），不要将 `.env` 文件复制进镜像。启动脚本会在启动 Next.js 前读取并校验 `BASE_PATH`，只改运行环境并重启容器即可切换路径，不需要重新构建镜像。`ZITADEL_API_URL` 可使用 Docker 网络中的服务地址，`ZITADEL_EXTERNALDOMAIN` 提供公开域名供 ZITADEL 识别实例；服务账号 PAT 可只读挂载到容器并由 `ZITADEL_SERVICE_USER_TOKEN_FILE` 指向。
 
 ```sh
 docker run --rm --network <zitadel-network> -p 3000:3000 \
@@ -59,8 +59,6 @@ docker run --rm --network <zitadel-network> -p 3000:3000 \
 ```
 
 容器网络中，`.env.local` 可配置 `ZITADEL_API_URL=http://zitadel:8080` 和 `ZITADEL_EXTERNALDOMAIN=id.example.com`。如果使用 `CUSTOM_REQUEST_HEADERS`，它会覆盖同名的自动生成请求头；挂载的 token 文件优先于 `ZITADEL_SERVICE_TOKEN`。
-
-`BASE_PATH` 会在构建时写入 Next.js 产物，默认是 `/`。若部署在子路径，可在 GitHub 仓库的 Actions Variables 中设置 `BASE_PATH`（例如 `/auth`），再推送 tag 触发构建。
 
 ## 功能
 

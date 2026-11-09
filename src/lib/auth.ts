@@ -36,7 +36,7 @@ export type AuthContext = { authRequestId?: string; userId?: string; code?: stri
 export type ActionResult = { ok: true; message?: string; redirect?: string; form?: { action: string; fields: Record<string, string> } } | { ok: false; message: string; requestId?: string };
 export type ChallengeResult = (ActionResult & { options?: Record<string, unknown>; secret?: string; uri?: string });
 
-// 保留应用内路径，供 Next.js Link / redirect 自动添加 basePath，避免重复前缀。
+// 保留应用内路径；AppLink 或服务器跳转会按运行时 BASE_PATH 添加前缀。
 // 仅转发协议上下文，不允许浏览器指定任意回跳地址或传播验证码。
 export function authLink(path: string, context: AuthContext) {
   const query = new URLSearchParams();

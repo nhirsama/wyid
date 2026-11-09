@@ -10,7 +10,7 @@ import { GET } from "@/app/idp/callback/route";
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.pending.mockResolvedValue({ authRequestId: "V2_test" });
-  vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/auth");
+  vi.stubEnv("BASE_PATH", "/auth");
 });
 afterEach(() => vi.unstubAllEnvs());
 

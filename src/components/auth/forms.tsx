@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -13,12 +12,15 @@ import {
 } from "@/lib/auth";
 import { authenticate } from "@/lib/webauthn";
 import { withBasePath } from "@/lib/paths";
+import { useBasePath } from "@/components/auth/brand-provider";
+import { AppLink } from "@/components/ui/app-link";
 import { beginFactor, chooseIdentityProvider, startPasskey, finishPasskey, finishTotpEnrollment, login, register, requestPasswordReset, resendEmail, resetPassword, startTotpEnrollment, verifyEmail, verifyFactor } from "@/server/actions";
 import { Feedback, Field, Notice, Submit, useAuthAction } from "@/components/ui/form";
 
 type Props = { context: AuthContext; policy: LoginPolicy };
 
 function useWebAuthnLogin(context: AuthContext) {
+  const basePath = useBasePath();
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +42,7 @@ function useWebAuthnLogin(context: AuthContext) {
       const assertion = await authenticate(options);
       const result = await finishPasskey(assertion, context);
       if (!result.ok) { setError(result.message); return; }
-      if (result.redirect) window.location.assign(withBasePath(result.redirect));
+      if (result.redirect) window.location.assign(withBasePath(result.redirect, basePath));
       else setMessage(result.message);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "无法完成通行密钥登录。"); setOptions(undefined); }
     finally { setPending(false); }
@@ -63,7 +65,7 @@ export function LoginForm({ context, policy }: Props) {
         {policy.password && <>
           <Field label="密码" type="password" registration={form.register("password")} error={form.formState.errors.password?.message}
             autoComplete="current-password" placeholder="输入你的密码" maxLength={1024} />
-          <div className="form-links"><Link href={authLink("/forgot-password", context)}>忘记密码？</Link></div>
+          <div className="form-links"><AppLink href={authLink("/forgot-password", context)}>忘记密码？</AppLink></div>
           <Submit pending={action.pending}>{context.authRequestId ? <>登录并继续<ArrowRight size={16} aria-hidden="true" /></> : "登录"}</Submit>
         </>}
       </fieldset>
@@ -83,7 +85,7 @@ export function LoginForm({ context, policy }: Props) {
         <Submit pending={false}>继续身份提供方登录</Submit>
       </form>}
     </div>}
-    {policy.registration && <p className="auth-switch">还没有账号？<Link href={authLink("/register", context)}>创建账号</Link></p>}
+    {policy.registration && <p className="auth-switch">还没有账号？<AppLink href={authLink("/register", context)}>创建账号</AppLink></p>}
   </>;
 }
 
@@ -94,7 +96,7 @@ export function RegisterForm({ context, policy }: Props) {
     if (!passwordMeetsPolicy(input.password, policy.passwordPolicy)) { form.setError("password", { message: `密码不符合要求：${passwordHint(policy.passwordPolicy)}。` }); return; }
     action.run(() => register(input, context));
   }
-  if (action.result?.ok && action.result.message) return <div className="result-stack"><Notice kind="success">{action.result.message}</Notice><Link className="button primary-button wide" href={action.result.redirect || authLink("/login", context)}>继续<ArrowRight size={16} /></Link></div>;
+  if (action.result?.ok && action.result.message) return <div className="result-stack"><Notice kind="success">{action.result.message}</Notice><AppLink className="button primary-button wide" href={action.result.redirect || authLink("/login", context)}>继续<ArrowRight size={16} /></AppLink></div>;
   return <>
     <form className="form" noValidate onSubmit={form.handleSubmit(submit)}>
       <Feedback result={action.result} />
@@ -108,14 +110,14 @@ export function RegisterForm({ context, policy }: Props) {
         <Submit pending={action.pending}>创建账号<ArrowRight size={16} aria-hidden="true" /></Submit>
       </fieldset>
     </form>
-    <p className="auth-switch">已有账号？<Link href={authLink("/login", context)}>前往登录</Link></p>
+    <p className="auth-switch">已有账号？<AppLink href={authLink("/login", context)}>前往登录</AppLink></p>
   </>;
 }
 
 export function ForgotPasswordForm({ context }: { context: AuthContext }) {
   const form = useForm<ForgotPasswordInput>({ resolver: zodResolver(forgotPasswordSchema), defaultValues: { loginName: context.loginHint || "" } });
   const action = useAuthAction();
-  if (action.result?.ok) return <div className="result-stack"><Notice kind="success">{action.result.message}</Notice><Link className="button secondary-button wide" href={authLink("/login", context)}>返回登录</Link></div>;
+  if (action.result?.ok) return <div className="result-stack"><Notice kind="success">{action.result.message}</Notice><AppLink className="button secondary-button wide" href={authLink("/login", context)}>返回登录</AppLink></div>;
   return <form className="form" noValidate onSubmit={form.handleSubmit(input => action.run(() => requestPasswordReset(input, context)))}>
     <Feedback result={action.result} />
     <fieldset disabled={action.pending} className="form-fieldset">
@@ -142,7 +144,7 @@ export function ResetPasswordForm({ context, policy }: Props) {
         <Submit pending={action.pending} disabled={!context.userId}>保存新密码</Submit>
       </fieldset>
     </form>
-    {action.result?.ok && <p className="capability-note">{action.result.message} <Link href={authLink("/login", context)}>前往登录</Link></p>}
+    {action.result?.ok && <p className="capability-note">{action.result.message} <AppLink href={authLink("/login", context)}>前往登录</AppLink></p>}
   </>;
 }
 
@@ -150,7 +152,7 @@ export function VerifyEmailForm({ context }: { context: AuthContext }) {
   const form = useForm<VerifyEmailInput>({ resolver: zodResolver(verifyEmailSchema), defaultValues: { code: context.code || "" } });
   const action = useAuthAction();
   const resend = useAuthAction();
-  if (action.result?.ok) return <div className="result-stack"><Notice kind="success">{action.result.message}</Notice><Link className="button primary-button wide" href={authLink("/login", context)}>继续登录<ArrowRight size={16} /></Link></div>;
+  if (action.result?.ok) return <div className="result-stack"><Notice kind="success">{action.result.message}</Notice><AppLink className="button primary-button wide" href={authLink("/login", context)}>继续登录<ArrowRight size={16} /></AppLink></div>;
   return <>
     {!context.userId && <Notice kind="error">验证邮件链接缺少账号标识，请重新打开邮件中的链接。</Notice>}
     <form className="form" noValidate onSubmit={form.handleSubmit(input => action.run(() => verifyEmail(input, context)))}>
@@ -167,6 +169,7 @@ export function VerifyEmailForm({ context }: { context: AuthContext }) {
 
 const factorLabels: Record<Factor, string> = { totp: "验证器动态码", otpEmail: "邮件验证码", otpSms: "短信验证码", u2f: "安全密钥" };
 export function VerifyFactorForm({ context, methods }: { context: AuthContext; methods: Factor[] }) {
+  const basePath = useBasePath();
   const [method, setMethod] = useState<Factor>(methods.includes("totp") ? "totp" : methods[0] || "totp");
   const [webauthnPending, setWebauthnPending] = useState(false);
   const [webauthnError, setWebauthnError] = useState<string>();
@@ -189,7 +192,7 @@ export function VerifyFactorForm({ context, methods }: { context: AuthContext; m
     try {
       const assertion = await authenticate(webauthnOptions);
       const done = await finishPasskey(assertion, context);
-      if (done.ok && done.redirect) window.location.assign(withBasePath(done.redirect));
+      if (done.ok && done.redirect) window.location.assign(withBasePath(done.redirect, basePath));
       else if (!done.ok) { setWebauthnError(done.message); setWebauthnOptions(undefined); }
     } catch (error) { setWebauthnError(error instanceof Error ? error.message : "安全密钥验证失败。"); setWebauthnOptions(undefined); }
     finally { setWebauthnPending(false); }
@@ -213,7 +216,7 @@ export function VerifyFactorForm({ context, methods }: { context: AuthContext; m
       {method === "u2f" && challengeStarted && webauthnOptions && <button className="button secondary-button wide" type="button" disabled={webauthnPending} onClick={() => void verifyHardwareKey()}>使用安全密钥验证</button>}
       {webauthnError && <Notice kind="error">{webauthnError}</Notice>}
     </div>
-    <Link className="text-link centered" href={authLink("/login", context)}>返回登录</Link>
+    <AppLink className="text-link centered" href={authLink("/login", context)}>返回登录</AppLink>
   </>;
 }
 

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { getBrand } from "@/server/brand";
 import { BrandProvider } from "@/components/auth/brand-provider";
+import { runtimeBasePath } from "@/lib/paths";
 import "lxgw-wenkai-webfont/lxgwwenkai-regular.css";
 import "./globals.css";
 
@@ -26,5 +27,6 @@ export function generateMetadata(): Metadata {
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="zh-CN" className={mono.variable}><body><BrandProvider brand={getBrand()}><a href="#main-content" className="skip-link">跳到主要内容</a>{children}</BrandProvider></body></html>;
+  const basePath = runtimeBasePath();
+  return <html lang="zh-CN" className={mono.variable}><body><BrandProvider brand={getBrand()} basePath={basePath}><a href="#main-content" className="skip-link">跳到主要内容</a>{children}</BrandProvider></body></html>;
 }

@@ -1,9 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import type { ReactNode } from "react";
 import { useBrand } from "./brand-provider";
+import { AppLink } from "@/components/ui/app-link";
 
 export function AuthShell({ children }: { children: ReactNode }) {
   const brand = useBrand();
@@ -30,7 +30,7 @@ export function AuthPanel({ title, description, children, back }: {
   back?: string;
 }) {
   return <section className="auth-card" aria-labelledby="auth-title">
-    {back && <Link href={back} className="back-link"><span aria-hidden="true">←</span> 返回登录</Link>}
+    {back && <AppLink href={back} className="back-link"><span aria-hidden="true">←</span> 返回登录</AppLink>}
     <header className="auth-heading"><h1 id="auth-title">{title}</h1><p>{description}</p></header>
     {children}
   </section>;

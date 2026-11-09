@@ -5,6 +5,7 @@ import { CheckCircle, Eye, EyeSlash, Info, SpinnerGap, WarningCircle } from "@ph
 import type { UseFormRegisterReturn } from "react-hook-form";
 import type { ActionResult } from "@/lib/auth";
 import { withBasePath } from "@/lib/paths";
+import { useBasePath } from "@/components/auth/brand-provider";
 
 type FieldProps = {
   label: string;
@@ -57,6 +58,7 @@ export function Feedback({ result }: { result: ActionResult | null }) {
 }
 
 export function useAuthAction() {
+  const basePath = useBasePath();
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<ActionResult | null>(null);
   function run(task: () => Promise<ActionResult>) {
@@ -64,7 +66,7 @@ export function useAuthAction() {
     startTransition(async () => {
       try {
         const next = await task();
-        if (next.ok && next.redirect) window.location.assign(withBasePath(next.redirect));
+        if (next.ok && next.redirect) window.location.assign(withBasePath(next.redirect, basePath));
         else setResult(next);
       } catch {
         setResult({ ok: false, message: "连接中断，请检查网络后重试。" });

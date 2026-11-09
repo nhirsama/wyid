@@ -22,7 +22,11 @@ test("serves static assets and keeps not-found links under the base path", async
   expect(font.status()).toBe(200);
   await page.goto(path("/page-that-does-not-exist"));
   await expect(page.getByRole("link", { name: "回到登录页" })).toHaveAttribute("href", path("/login"));
-  const stylesheetUrls = await page.locator('link[rel="stylesheet"]').evaluateAll(links => links.map(link => link.getAttribute("href")));
+  await expect(page.getByRole("heading", { name: "好像走错地方了" })).toBeVisible();
+  const brandName = await page.locator(".auth-brand").innerText();
+  await expect(page.locator(".auth-footer")).toContainText(brandName);
+  await expect(page.getByRole("link", { name: "跳到主要内容" })).toHaveAttribute("href", /#main-content$/);
+  const stylesheetUrls = await page.locator('link[rel="stylesheet"]').evaluateAll(links => links.map(link => new URL((link as HTMLLinkElement).href).pathname));
   expect(stylesheetUrls.length).toBeGreaterThan(0);
   for (const url of stylesheetUrls) expect(url?.startsWith(`${basePath}/_next/`)).toBe(true);
 });
