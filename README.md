@@ -7,7 +7,7 @@
 ```sh
 pnpm install
 cp .env.example .env.local
-# 填写 .env.local 中的 ZITADEL_API_URL、ZITADEL_SERVICE_TOKEN 和 SESSION_SECRET
+# 填写 .env.local 中的 ZITADEL_API_URL、服务账号 PAT（直接填写或配置 token 文件）和 SESSION_SECRET
 pnpm dev
 ```
 
@@ -21,8 +21,11 @@ pnpm dev
 | --- | --- |
 | `APP_URL` | 此登录站点的公开 Origin；用于邮件链接、Passkey RP ID 和身份提供方回调 |
 | `BASE_PATH` | 站点基本路径，默认 `/`；例如 `/auth`，也支持 `/account/login-ui` 多级路径 |
-| `ZITADEL_API_URL` | ZITADEL HTTPS Origin，不含路径 |
-| `ZITADEL_SERVICE_TOKEN` | 具备所需 Session、OIDC、User、Settings 权限的服务账号 PAT |
+| `ZITADEL_API_URL` | ZITADEL API 来源地址，不含路径；容器网络可配置为 `http://zitadel:8080` |
+| `ZITADEL_EXTERNALDOMAIN` | ZITADEL 实例的公开域名，不带协议或路径；API 走内部 HTTP 时用于设置公开 Host 和实例识别请求头 |
+| `CUSTOM_REQUEST_HEADERS` | 可选的额外/覆盖 API 请求头，格式为 `Header:Value,Header:Value`；例如 `Host:id.example.com,X-Forwarded-Proto:https` |
+| `ZITADEL_SERVICE_TOKEN` | 服务账号 PAT；可直接填写，或使用下方文件变量挂载 |
+| `ZITADEL_SERVICE_USER_TOKEN_FILE` | 服务账号 PAT 文件路径；设置后优先于 `ZITADEL_SERVICE_TOKEN`，适用于挂载 Docker/Kubernetes Secret |
 | `SESSION_SECRET` | 至少 32 字符的独立随机密钥，用于加密待完成验证的 HttpOnly Cookie |
 | `ZITADEL_ORGANIZATION_ID` | 可选默认组织；授权请求带有 `urn:zitadel:iam:org:id:` scope 时采用请求对应的组织策略 |
 | `SITE_NICKNAME` | 站点展示昵称 |
@@ -45,11 +48,17 @@ BASE_PATH=/auth
 
 ## Docker / GHCR
 
-推送 Git tag（例如 `v1.2.3`）会自动构建并发布 `linux/amd64` 与 `linux/arm64` 镜像到 `ghcr.io/<owner>/<repository>`，并生成对应版本标签和 `latest` 标签。运行时通过环境变量或 `--env-file` 提供上述 ZITADEL 配置，不要将 `.env` 文件复制进镜像。
+推送 Git tag（例如 `v1.2.3`）会自动构建并发布 `linux/amd64` 与 `linux/arm64` 镜像到 `ghcr.io/<owner>/<repository>`，并生成对应版本标签和 `latest` 标签。运行时通过环境变量或 `--env-file` 提供上述 ZITADEL 配置，不要将 `.env` 文件复制进镜像。`ZITADEL_API_URL` 可使用 Docker 网络中的服务地址，`ZITADEL_EXTERNALDOMAIN` 提供公开域名供 ZITADEL 识别实例；服务账号 PAT 可只读挂载到容器并由 `ZITADEL_SERVICE_USER_TOKEN_FILE` 指向。
 
 ```sh
-docker run --rm -p 3000:3000 --env-file .env.local ghcr.io/<owner>/<repository>:v1.2.3
+docker run --rm --network <zitadel-network> -p 3000:3000 \
+  --env-file .env.local \
+  --mount type=bind,src=/secure/zitadel-service-user-token,dst=/run/secrets/zitadel-service-user-token,readonly \
+  -e ZITADEL_SERVICE_USER_TOKEN_FILE=/run/secrets/zitadel-service-user-token \
+  ghcr.io/<owner>/<repository>:v1.2.3
 ```
+
+容器网络中，`.env.local` 可配置 `ZITADEL_API_URL=http://zitadel:8080` 和 `ZITADEL_EXTERNALDOMAIN=id.example.com`。如果使用 `CUSTOM_REQUEST_HEADERS`，它会覆盖同名的自动生成请求头；挂载的 token 文件优先于 `ZITADEL_SERVICE_TOKEN`。
 
 `BASE_PATH` 会在构建时写入 Next.js 产物，默认是 `/`。若部署在子路径，可在 GitHub 仓库的 Actions Variables 中设置 `BASE_PATH`（例如 `/auth`），再推送 tag 触发构建。
 

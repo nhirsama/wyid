@@ -1,7 +1,10 @@
 import { expect, test } from "@playwright/test";
+import { existsSync } from "node:fs";
 import { normalizeBasePath, withBasePath } from "../../src/lib/paths";
 
-const configured = Boolean(process.env.APP_URL && process.env.ZITADEL_API_URL && process.env.ZITADEL_SERVICE_TOKEN && process.env.SESSION_SECRET);
+const tokenFile = process.env.ZITADEL_SERVICE_USER_TOKEN_FILE;
+const hasServiceToken = Boolean(process.env.ZITADEL_SERVICE_TOKEN || (tokenFile && existsSync(tokenFile)));
+const configured = Boolean(process.env.APP_URL && process.env.ZITADEL_API_URL && hasServiceToken && process.env.SESSION_SECRET);
 const authRequestId = process.env.ZITADEL_TEST_AUTH_REQUEST_ID;
 const basePath = normalizeBasePath(process.env.BASE_PATH);
 const path = (value: string) => withBasePath(value, basePath);
@@ -28,7 +31,7 @@ test("missing service configuration lists the required variables", async ({ page
   test.skip(configured, "ZITADEL 服务已配置。");
   await page.goto(path("/login"));
   await expect(page.getByRole("heading", { name: "服务配置不完整" })).toBeVisible();
-  await expect(page.getByText(/ZITADEL_API_URL|ZITADEL_SERVICE_TOKEN|SESSION_SECRET/)).toBeVisible();
+  await expect(page.getByText(/ZITADEL_API_URL|ZITADEL_SERVICE_TOKEN|ZITADEL_SERVICE_USER_TOKEN_FILE|SESSION_SECRET/)).toBeVisible();
 });
 
 test.describe("connected ZITADEL UI", () => {
