@@ -1,0 +1,13 @@
+.git
+.github
+.agents
+.aws
+.codex
+.local
+.next
+node_modules
+coverage
+playwright-report
+test-results
+*.tsbuildinfo
+.env*
