@@ -1,6 +1,6 @@
 :root {
   --sans: "LXGW WenKai", "Kaiti SC", KaiTi, STKaiti, serif;
-  --mono: var(--font-ui-mono), "SFMono-Regular", Consolas, monospace;
+  --mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   --background: #f5f7fb;
   --surface: #fff;
   --text: #435678;
@@ -98,7 +98,6 @@ h1, p { overflow-wrap: anywhere; }
 .form-actions > button { flex: 1; }
 .consent-actions { margin-top: 3px; }
 .auth-methods { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
-.flow-note { display: flex; gap: 8px; align-items: center; margin: -7px 0 23px; padding: 10px 12px; border: 1px solid #e0e9f5; border-radius: 8px; background: #f6f9fd; color: #6a85a9; font-size: 13px; }
 .notice { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 20px; border: 1px solid #dce6f4; border-radius: 8px; padding: 12px 14px; background: #f4f8fd; color: #6581a6; font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
 .notice>svg { margin-top: 3px; }
 .notice>div { min-width: 0; }

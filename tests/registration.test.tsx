@@ -37,6 +37,15 @@ const cases = [
 ];
 
 describe("registration follows the live ZITADEL policy", () => {
+  it.each([{}, { authRequestId: "V2_test" }])("keeps the login button and removes the extra flow note for %j", async context => {
+    const policy = await zitadel.policy();
+    const html = renderToStaticMarkup(<LoginForm context={context} policy={policy} />);
+    expect(html).toMatch(/<button\b[^>]*type="submit"[^>]*>登录<\/button>/);
+    expect(html).not.toContain("登录并继续");
+    expect(html).not.toContain("登录后继续访问你的应用");
+    expect(html).not.toContain("flow-note");
+  });
+
   it("reads instance settings when no organization is specified", async () => {
     expect((await zitadel.policy()).registration).toBe(true);
     expect(mocks.loginSettings).toHaveBeenCalledWith({ ctx: expect.objectContaining({ resourceOwner: { case: "instance", value: true } }) });

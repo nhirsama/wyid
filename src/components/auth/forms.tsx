@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowRight, Fingerprint, ShieldCheck } from "@phosphor-icons/react";
+import { ArrowRight, Fingerprint } from "@phosphor-icons/react";
 import {
   authLink, canRegisterWithPassword, forgotPasswordSchema, loginSchema, passwordHint, passwordMeetsPolicy, registerSchema,
   resetPasswordSchema, verifyEmailSchema, type AuthContext, type LoginPolicy,
@@ -55,8 +55,7 @@ export function LoginForm({ context, policy }: Props) {
   const webauthn = useWebAuthnLogin(context);
   const hasAlternatives = policy.passkey || policy.identityProviders.length > 0;
   return <>
-    {context.authRequestId && <div className="flow-note"><ShieldCheck size={17} aria-hidden="true" /><span>登录后继续访问你的应用</span></div>}
-    <form className="form" noValidate onSubmit={form.handleSubmit(input => action.run(() => login(input, context)))}>
+    <form method="post" className="form" noValidate onSubmit={form.handleSubmit(input => action.run(() => login(input, context)))}>
       <Feedback result={action.result} />
       <fieldset disabled={action.pending || webauthn.pending} className="form-fieldset">
         {(policy.password || policy.passkey) && <Field label="邮箱或用户名" registration={form.register("loginName")} error={form.formState.errors.loginName?.message}
@@ -65,7 +64,7 @@ export function LoginForm({ context, policy }: Props) {
           <Field label="密码" type="password" registration={form.register("password")} error={form.formState.errors.password?.message}
             autoComplete="current-password" placeholder="输入你的密码" maxLength={1024} />
           <div className="form-links"><AppLink href={authLink("/forgot-password", context)}>忘记密码？</AppLink></div>
-          <Submit pending={action.pending}>{context.authRequestId ? <>登录并继续<ArrowRight size={16} aria-hidden="true" /></> : "登录"}</Submit>
+          <Submit pending={action.pending}>登录</Submit>
         </>}
       </fieldset>
     </form>
@@ -97,7 +96,7 @@ export function RegisterForm({ context, policy }: Props) {
   }
   if (action.result?.ok && action.result.message) return <div className="result-stack"><Notice kind="success">{action.result.message}</Notice><AppLink className="button primary-button wide" href={action.result.redirect || authLink("/login", context)}>继续<ArrowRight size={16} /></AppLink></div>;
   return <>
-    <form className="form" noValidate onSubmit={form.handleSubmit(submit)}>
+    <form method="post" className="form" noValidate onSubmit={form.handleSubmit(submit)}>
       <Feedback result={action.result} />
       <fieldset disabled={action.pending} className="form-fieldset">
         <Field label="用户名" registration={form.register("username")} error={form.formState.errors.username?.message} autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="输入用户名" maxLength={100} />
@@ -115,7 +114,7 @@ export function ForgotPasswordForm({ context }: { context: AuthContext }) {
   const form = useForm<ForgotPasswordInput>({ resolver: zodResolver(forgotPasswordSchema), defaultValues: { loginName: context.loginHint || "" } });
   const action = useAuthAction();
   if (action.result?.ok) return <div className="result-stack"><Notice kind="success">{action.result.message}</Notice><AppLink className="button secondary-button wide" href={authLink("/login", context)}>返回登录</AppLink></div>;
-  return <form className="form" noValidate onSubmit={form.handleSubmit(input => action.run(() => requestPasswordReset(input, context)))}>
+  return <form method="post" className="form" noValidate onSubmit={form.handleSubmit(input => action.run(() => requestPasswordReset(input, context)))}>
     <Feedback result={action.result} />
     <fieldset disabled={action.pending} className="form-fieldset">
       <Field label="邮箱或用户名" registration={form.register("loginName")} error={form.formState.errors.loginName?.message} autoComplete="username" placeholder="输入注册邮箱或用户名" maxLength={320} />
@@ -132,7 +131,7 @@ export function ResetPasswordForm({ context, policy }: Props) {
     action.run(() => resetPassword(input, context));
   }
   return <>
-    <form className="form" noValidate onSubmit={form.handleSubmit(submit)}>
+    <form method="post" className="form" noValidate onSubmit={form.handleSubmit(submit)}>
       <Feedback result={action.result} />
       <fieldset disabled={action.pending} className="form-fieldset">
         <Field label="邮件验证码" registration={form.register("code")} error={form.formState.errors.code?.message} autoComplete="one-time-code" placeholder="输入邮件中的验证码" maxLength={256} />
@@ -152,7 +151,7 @@ export function VerifyEmailForm({ context }: { context: AuthContext }) {
   if (action.result?.ok) return <div className="result-stack"><Notice kind="success">{action.result.message}</Notice><AppLink className="button primary-button wide" href={authLink("/login", context)}>继续登录<ArrowRight size={16} /></AppLink></div>;
   return <>
     {!context.userId && <Notice kind="error">验证邮件链接缺少账号标识，请重新打开邮件中的链接。</Notice>}
-    <form className="form" noValidate onSubmit={form.handleSubmit(input => action.run(() => verifyEmail(input, context)))}>
+    <form method="post" className="form" noValidate onSubmit={form.handleSubmit(input => action.run(() => verifyEmail(input, context)))}>
       <Feedback result={action.result} />
       <fieldset disabled={action.pending} className="form-fieldset">
         <Field label="邮箱验证码" registration={form.register("code")} error={form.formState.errors.code?.message} autoComplete="one-time-code" placeholder="输入邮件中的验证码" maxLength={256} />

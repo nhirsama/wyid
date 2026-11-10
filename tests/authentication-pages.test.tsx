@@ -39,6 +39,16 @@ beforeEach(() => {
 });
 
 describe("verification route trusts the live gate instead of cookie method flags", () => {
+  it.each([undefined, "V2_test"])("does not add application metadata for authRequest=%s", async authRequestId => {
+    mocks.pending.mockResolvedValue({ ...pending, authRequestId });
+    const html = renderToStaticMarkup(await VerifyPage({ searchParams: Promise.resolve({ authRequest: authRequestId }) }));
+    expect(html).toContain("完成验证后即可继续登录。");
+    expect(html).not.toContain("Test App");
+    expect(html).not.toContain("app.example.com");
+    expect(mocks.request).not.toHaveBeenCalled();
+    expect(mocks.inspect).toHaveBeenCalled();
+  });
+
   it.each([
     ["mfa", false, "verify:totp"], ["mfa", true, "enroll:totp"],
     ["verify-email", false, "verify-email"], ["password-change", false, "password-change"],

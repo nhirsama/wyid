@@ -14,7 +14,7 @@ FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-RUN pnpm build
+RUN pnpm build && pnpm test:basepath
 
 FROM node:24-alpine AS runner
 WORKDIR /app

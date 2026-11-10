@@ -41,6 +41,12 @@ describe("authorization navigation", () => {
     const context = authContext({ returnTo: "https://example.org", sessionToken: "secret", authRequest: ["one", "two"] });
     expect(authLink("/login", context)).toBe("/login");
   });
+  it("does not carry passwords, confirmation fields or verification codes into navigation URLs", () => {
+    const context = authContext({ authRequest: "V2_test", password: "secret", confirmPassword: "secret", code: "001234" });
+    expect(context).not.toHaveProperty("password");
+    expect(context).not.toHaveProperty("confirmPassword");
+    expect(authLink("/login", context)).toBe("/login?authRequest=V2_test");
+  });
 });
 describe("OAuth consent scopes", () => {
   it("deduplicates known scopes and safely labels unknown scopes", () => {

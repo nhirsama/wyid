@@ -18,15 +18,18 @@ test("serves health checks and redirects the landing page under the base path", 
 });
 
 test("serves static assets and keeps not-found links under the base path", async ({ page, request }) => {
-  const font = await request.get(path("/fonts/jetbrains-mono-latin.woff2"));
-  expect(font.status()).toBe(200);
   await page.goto(path("/page-that-does-not-exist"));
+  await expect(page.locator('link[rel="stylesheet"][href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/lxgwwenkai-regular.css"]')).toHaveCount(1);
+  await expect(page.locator('link[rel="stylesheet"][href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.2.8/latin-400.css"]')).toHaveCount(1);
   await expect(page.getByRole("link", { name: "回到登录页" })).toHaveAttribute("href", path("/login"));
   await expect(page.getByRole("heading", { name: "好像走错地方了" })).toBeVisible();
   const brandName = await page.locator(".auth-brand").innerText();
   await expect(page.locator(".auth-footer")).toContainText(brandName);
   await expect(page.getByRole("link", { name: "跳到主要内容" })).toHaveAttribute("href", /#main-content$/);
-  const stylesheetUrls = await page.locator('link[rel="stylesheet"]').evaluateAll(links => links.map(link => new URL((link as HTMLLinkElement).href).pathname));
+  const stylesheetUrls = await page.locator('link[rel="stylesheet"]').evaluateAll(links => links
+    .map(link => new URL((link as HTMLLinkElement).href))
+    .filter(url => url.origin === window.location.origin)
+    .map(url => url.pathname));
   expect(stylesheetUrls.length).toBeGreaterThan(0);
   const stylesheetContents: string[] = [];
   for (const url of stylesheetUrls) {
@@ -56,6 +59,7 @@ test.describe("connected ZITADEL UI", () => {
     await expect(page.getByRole("heading", { name: "登录账号" })).toBeVisible();
     await expect(page.getByLabel("邮箱或用户名")).toBeVisible();
     await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "登录", exact: true })).toBeEnabled();
     await expect(page.getByText("登录请求已过期或缺失，无法继续验证账号。")).toHaveCount(0);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     expect(overflow).toBe(false);

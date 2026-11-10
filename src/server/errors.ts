@@ -7,7 +7,7 @@ export class AuthError extends Error {
   constructor(message: string) { super(message); this.name = "AuthError"; }
 }
 
-export function actionError(error: unknown): ActionResult {
+export function actionError(error: unknown): Extract<ActionResult, { ok: false }> {
   if (error instanceof AuthError || error instanceof ConfigurationError) return { ok: false, message: error.message };
   if (error instanceof ZodError) return { ok: false, message: "提交的信息不完整或格式有误，请检查后重试。" };
   const requestId = randomUUID();

@@ -12,11 +12,19 @@ import { inspectAuthentication, type AuthenticationState } from "./authenticatio
 import { ErrorReason, Prompt } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
 import { redirect } from "next/navigation";
 import { consentToken, matchesConsentToken } from "./consent";
+import { runtimeBasePath, siteUrl } from "@/lib/paths";
 
 const contextSchema = z.object({ authRequestId: z.string().min(1).max(1024).optional(), userId: z.string().min(1).max(1024).optional() });
 function context(raw: AuthContext) { return contextSchema.parse(raw); }
 const keyMethodSchema = z.enum(["passkey", "u2f"]);
 const otpMethodSchema = z.enum(["otpEmail", "otpSms"]);
+
+function redirectFromAction(path: string): never {
+  // Unlike page-render redirects, MPA Server Actions send Location unchanged.
+  // Use a full URL for subpaths so Next cannot prepend BASE_PATH a second time
+  // while attempting to stream the redirect destination for a fetch action.
+  redirect(runtimeBasePath() ? siteUrl(path, getConfig().appUrl).href : path);
+}
 
 async function pendingFor(ctx: ReturnType<typeof context>) {
   const pending = await readPendingSession();
@@ -307,11 +315,11 @@ export async function resumeAuthentication(rawContext: AuthContext): Promise<Act
 }
 export async function resumeAccountAuthentication() {
   const session = await readAuthenticatedSession();
-  if (!session) redirect("/login");
+  if (!session) redirectFromAction("/login");
   await clearAuthenticatedSession();
   const result = await finishOrFactor({ ...session, mfaStartedAt: Date.now() });
-  if (result.ok && result.redirect) redirect(result.redirect);
-  redirect("/login");
+  if (result.ok && result.redirect) redirectFromAction(result.redirect);
+  redirectFromAction("/login");
 }
 export async function register(raw: unknown, rawContext: AuthContext): Promise<ActionResult> {
   try {
@@ -397,7 +405,7 @@ export async function logout() {
   }
   await clearAuthenticatedSession();
   await clearPendingSession();
-  redirect("/login");
+  redirectFromAction("/login");
 }
 export async function completeIdentityProvider(raw: unknown): Promise<ActionResult> {
   try {

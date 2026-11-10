@@ -1,20 +1,10 @@
 import type { Metadata } from "next";
-import localFont from "next/font/local";
 import { getBrand } from "@/server/brand";
 import { BrandProvider } from "@/components/auth/brand-provider";
 import { runtimeBasePath } from "@/lib/paths";
-import "lxgw-wenkai-webfont/lxgwwenkai-regular.css";
 import "./globals.css";
 
 export const dynamic = "force-dynamic";
-
-const mono = localFont({
-  src: "../../public/fonts/jetbrains-mono-latin.woff2",
-  variable: "--font-ui-mono",
-  weight: "400",
-  display: "swap",
-  preload: false,
-});
 
 export function generateMetadata(): Metadata {
   const brand = getBrand();
@@ -28,5 +18,12 @@ export function generateMetadata(): Metadata {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const basePath = runtimeBasePath();
-  return <html lang="zh-CN" className={mono.variable}><body><BrandProvider brand={getBrand()} basePath={basePath}><a href="#main-content" className="skip-link">跳到主要内容</a>{children}</BrandProvider></body></html>;
+  return <html lang="zh-CN">
+    <head>
+      <link rel="preconnect" href="https://cdn.jsdelivr.net" crossOrigin="anonymous" />
+      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/lxgwwenkai-regular.css" />
+      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.2.8/latin-400.css" />
+    </head>
+    <body><BrandProvider brand={getBrand()} basePath={basePath}><a href="#main-content" className="skip-link">跳到主要内容</a>{children}</BrandProvider></body>
+  </html>;
 }

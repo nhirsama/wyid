@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, useTransition, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, useTransition, type ComponentProps, type ReactNode } from "react";
 import { CheckCircle, Eye, EyeSlash, Info, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
 import type { UseFormRegisterReturn } from "react-hook-form";
 import type { ActionResult } from "@/lib/auth";
@@ -34,10 +34,20 @@ export function Field({ label, error, hint, registration, type = "text", ...prop
   );
 }
 
+const subscribeToHydration = () => () => undefined;
+const clientHydrated = () => true;
+const serverHydrated = () => false;
+
 export function Submit({ pending, children, ...props }: ComponentProps<"button"> & { pending: boolean; children: ReactNode }) {
-  return <button {...props} type="submit" className="button primary-button wide" disabled={pending || props.disabled} aria-busy={pending}>
-    {pending && <SpinnerGap size={18} className="spin" aria-hidden="true" />}{pending ? "正在处理…" : children}
-  </button>;
+  // These forms depend on client handlers. Do not allow native submission before
+  // hydration (or if a client chunk fails to load); explicit POST is the fallback.
+  const hydrated = useSyncExternalStore(subscribeToHydration, clientHydrated, serverHydrated);
+  return <>
+    <button {...props} type="submit" className="button primary-button wide" disabled={!hydrated || pending || props.disabled} aria-busy={pending}>
+      {pending && <SpinnerGap size={18} className="spin" aria-hidden="true" />}{pending ? "正在处理…" : children}
+    </button>
+    <noscript><p className="field-error" role="alert">请启用 JavaScript 并重新加载页面后再提交。</p></noscript>
+  </>;
 }
 
 export function Notice({ children, kind = "info" }: { children: ReactNode; kind?: "info" | "error" | "success" }) {

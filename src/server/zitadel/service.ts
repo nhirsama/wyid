@@ -3,7 +3,7 @@ import type { Duration } from "@bufbuild/protobuf/wkt";
 import { makeReqCtx } from "@zitadel/client/v2";
 import { CreateSessionRequestSchema, SetSessionRequestSchema } from "@zitadel/proto/zitadel/session/v2/session_service_pb.js";
 import { CreateCallbackRequestSchema } from "@zitadel/proto/zitadel/oidc/v2/oidc_service_pb.js";
-import { ErrorReason } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
+import { ErrorReason, type AuthRequest } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
 import { UserVerificationRequirement } from "@zitadel/proto/zitadel/session/v2/challenge_pb.js";
 import { PasskeysType, SecondFactorType, MultiFactorType } from "@zitadel/proto/zitadel/settings/v2/login_settings_pb.js";
 import { AuthFactorState } from "@zitadel/proto/zitadel/user/v2/user_pb.js";
@@ -98,9 +98,9 @@ export const zitadel = {
     }
     return "";
   },
-  async organizationForAuth(authRequestId?: string) {
-    if (!authRequestId) return getConfig().organizationId;
-    const request = await this.authRequest(authRequestId);
+  async organizationForAuth(auth?: string | AuthRequest) {
+    if (!auth) return getConfig().organizationId;
+    const request = typeof auth === "string" ? await this.authRequest(auth) : auth;
     const organizationScope = request.scope.find(scope => scope.startsWith("urn:zitadel:iam:org:id:"));
     return organizationScope?.slice("urn:zitadel:iam:org:id:".length) || getConfig().organizationId;
   },

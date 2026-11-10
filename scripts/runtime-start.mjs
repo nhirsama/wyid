@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createRequire } from "node:module";
-import { withRuntimeBasePath } from "./runtime-config.mjs";
+import { applyRuntimeAssetPrefix, withRuntimeBasePath } from "./runtime-config.mjs";
 const require = createRequire(import.meta.url);
 const nextRequire = createRequire(require.resolve("next/dist/server/lib/start-server"));
 const { loadEnvConfig } = nextRequire("@next/env");
@@ -22,6 +22,9 @@ process.env.BASE_PATH = basePath || "/";
 const requiredFiles = JSON.parse(readFileSync(resolve(process.cwd(), ".next/required-server-files.json"), "utf8"));
 const nextConfig = withRuntimeBasePath(requiredFiles.config, basePath);
 process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify(nextConfig);
+// React emits module-preload script tags from these manifests independently
+// of Next's HTML assetPrefix, so both must agree before any route is loaded.
+applyRuntimeAssetPrefix(resolve(process.cwd(), ".next/server/app"), basePath);
 
 const { startServer } = nextRequire("next/dist/server/lib/start-server");
 const port = Number.parseInt(process.env.PORT || "3000", 10);

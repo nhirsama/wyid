@@ -121,7 +121,7 @@ export function MfaVerificationForm({ context, methods }: MfaProps) {
   return <>
     <Feedback result={action.result} />
     <AuthenticationRecovery context={context} action={action} />
-    {isCodeFactor(method) ? <form className={method === "totp" ? "form mfa-totp-form" : "form"} noValidate onSubmit={form.handleSubmit(verifyCode)}>
+    {isCodeFactor(method) ? <form method="post" className={method === "totp" ? "form mfa-totp-form" : "form"} noValidate onSubmit={form.handleSubmit(verifyCode)}>
       <p className="body-copy">{method === "totp" ? "请输入动态验证码。" : method === "otpEmail" ? "点击邮件中的链接即可完成验证，也可以在此输入验证码。" : "请获取并填写短信验证码。"}</p>
       <fieldset disabled={action.pending} className="form-fieldset">
         <Field label="验证码" registration={form.register("code")} error={form.formState.errors.code?.message}
@@ -232,7 +232,7 @@ export function MfaEnrollmentForm({ context, methods }: MfaProps) {
           autoCapitalize="none" spellCheck={false} onFocus={event => event.currentTarget.select()} /></label>
         <label className="field"><span>验证器 URI</span><input value={setup.uri} readOnly autoComplete="off"
           autoCapitalize="none" spellCheck={false} onFocus={event => event.currentTarget.select()} /></label>
-        <form className="form" noValidate onSubmit={totp.handleSubmit(input => action.run(() => finishTotpEnrollment(input, context)))}>
+        <form method="post" className="form" noValidate onSubmit={totp.handleSubmit(input => action.run(() => finishTotpEnrollment(input, context)))}>
           <fieldset disabled={action.pending} className="form-fieldset">
             <Field label="动态验证码" registration={totp.register("code")} error={totp.formState.errors.code?.message}
               autoComplete="one-time-code" inputMode="numeric" placeholder="000000" maxLength={6} className="otp-input" />
@@ -243,7 +243,7 @@ export function MfaEnrollmentForm({ context, methods }: MfaProps) {
     </>}
     {(method === "passkey" || method === "u2f") && <>
       <p className="field-hint">绑定{factorLabels[method]}后，还需使用它完成本次登录验证。</p>
-      <form className="form" noValidate onSubmit={key.handleSubmit(enrollKey)}>
+      <form method="post" className="form" noValidate onSubmit={key.handleSubmit(enrollKey)}>
         <fieldset disabled={action.pending} className="form-fieldset">
           <Field label="设备名称" registration={key.register("name")} error={key.formState.errors.name?.message}
             autoComplete="off" placeholder={method === "passkey" ? "例如：我的手机" : "例如：随身安全密钥"} maxLength={100} />
@@ -255,14 +255,14 @@ export function MfaEnrollmentForm({ context, methods }: MfaProps) {
       <p className="field-hint">启用{factorLabels[method]}后，继续获取登录验证码。</p>
       {method === "otpSms" && <>
         <p className="field-hint">已有已验证的手机号码可以直接启用。首次设置或更换号码，请先发送短信并验证手机号码。</p>
-        <form className="form" noValidate onSubmit={phone.handleSubmit(sendPhone)}>
+        <form method="post" className="form" noValidate onSubmit={phone.handleSubmit(sendPhone)}>
           <fieldset disabled={action.pending} className="form-fieldset">
             <Field label="手机号码" type="tel" registration={phone.register("phone")} error={phone.formState.errors.phone?.message}
               autoComplete="tel" placeholder="+8613800138000" maxLength={100} hint="请填写包含国家区号的完整号码，例如 +8613800138000。" />
             <Submit pending={action.pending}>{phoneStage === "sent" ? "重新发送手机验证短信" : "发送手机验证短信"}</Submit>
           </fieldset>
         </form>
-        {phoneStage === "sent" && <form className="form" noValidate onSubmit={phoneCode.handleSubmit(verifyPhone)}>
+        {phoneStage === "sent" && <form method="post" className="form" noValidate onSubmit={phoneCode.handleSubmit(verifyPhone)}>
           <fieldset disabled={action.pending} className="form-fieldset">
             <Field label="手机验证短信中的验证码" registration={phoneCode.register("code")} error={phoneCode.formState.errors.code?.message}
               inputMode="numeric" autoComplete="one-time-code" placeholder="输入手机验证码" maxLength={256}
@@ -294,7 +294,7 @@ export function LoginEmailVerificationForm({ context }: ContextProps) {
     <Notice>请验证账号邮箱，然后继续本次登录。可以打开验证邮件中的链接，也可以输入邮件中的验证码。</Notice>
     <Feedback result={action.result} />
     <AuthenticationRecovery context={context} action={action} />
-    <form className="form" noValidate onSubmit={form.handleSubmit(input => action.run(() => verifyLoginEmail(input, context)))}>
+    <form method="post" className="form" noValidate onSubmit={form.handleSubmit(input => action.run(() => verifyLoginEmail(input, context)))}>
       <fieldset disabled={action.pending} className="form-fieldset">
         <Field label="邮箱验证码" registration={form.register("code")} error={form.formState.errors.code?.message}
           defaultValue={context.code || ""} autoComplete="one-time-code" autoCapitalize="none" spellCheck={false} placeholder="输入邮件中的验证码" maxLength={256} />
@@ -320,7 +320,7 @@ export function LoginPasswordChangeForm({ context, policy }: ContextProps & { po
   }
   return <div className="result-stack">
     <Notice>请更新账号密码，然后继续本次登录。</Notice>
-    <form className="form" noValidate onSubmit={form.handleSubmit(submit)}>
+    <form method="post" className="form" noValidate onSubmit={form.handleSubmit(submit)}>
       <Feedback result={action.result} />
       <AuthenticationRecovery context={context} action={action} />
       <fieldset disabled={action.pending} className="form-fieldset">
@@ -339,7 +339,7 @@ export function ContinueAuthenticationForm({ context }: ContextProps) {
   const action = useMfaAction();
   return <div className="result-stack">
     <Notice>继续读取当前登录步骤，下一步由账号服务确认。</Notice>
-    <form className="form" onSubmit={event => { event.preventDefault(); action.run(() => resumeAuthentication(context)); }}>
+    <form method="post" className="form" onSubmit={event => { event.preventDefault(); action.run(() => resumeAuthentication(context)); }}>
       <Feedback result={action.result} />
       <Submit pending={action.pending}>继续登录<ArrowRight size={16} aria-hidden="true" /></Submit>
     </form>

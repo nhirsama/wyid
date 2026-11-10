@@ -17,7 +17,7 @@ export function ConsentForm({ authRequestId, consentToken, scopes, displayName, 
   const action = useAuthAction();
   const decision = (allow: boolean) => action.run(() => decideConsent({ authRequestId, consentToken, allow }));
 
-  return <form className="form consent-form" noValidate onSubmit={event => { event.preventDefault(); decision(true); }}>
+  return <form method="post" className="form consent-form" noValidate onSubmit={event => { event.preventDefault(); decision(true); }}>
     <Feedback result={action.result} />
     <p className="body-copy">该网站申请访问以下账号信息与权限。请确认这是你要登录的网站。</p>
     <div className="account-choice consent-account">
