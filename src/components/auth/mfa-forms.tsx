@@ -114,19 +114,19 @@ export function MfaVerificationForm({ context, methods }: MfaProps) {
     });
   }
   function switchLabel(type: Factor) {
-    return type === "totp" ? "使用两步验证码" : type === "passkey" ? "使用 Passkey 验证" : `使用${factorLabels[type]}`;
+    return type === "totp" ? "使用两步验证码" : type === "passkey" ? "使用 Passkey 验证"
+      : `使用${({ u2f: "安全密钥", otpEmail: "邮箱验证码", otpSms: "短信验证码" })[type]}`;
   }
 
   if (!methods.length) return <Notice kind="error">此登录会话没有可用的验证方式，请重新登录。</Notice>;
   return <>
     <Feedback result={action.result} />
     <AuthenticationRecovery context={context} action={action} />
-    {isCodeFactor(method) ? <form method="post" className={method === "totp" ? "form mfa-totp-form" : "form"} noValidate onSubmit={form.handleSubmit(verifyCode)}>
-      <p className="body-copy">{method === "totp" ? "请输入动态验证码。" : method === "otpEmail" ? "点击邮件中的链接即可完成验证，也可以在此输入验证码。" : "请获取并填写短信验证码。"}</p>
+    {isCodeFactor(method) ? <form method="post" className="form" noValidate onSubmit={form.handleSubmit(verifyCode)}>
+      <p className="body-copy">{method === "totp" ? "打开你的验证器，输入当前动态验证码。" : method === "otpEmail" ? "点击邮件中的链接即可完成验证，也可以在此输入验证码。" : "请获取并填写短信验证码。"}</p>
       <fieldset disabled={action.pending} className="form-fieldset">
         <Field label="验证码" registration={form.register("code")} error={form.formState.errors.code?.message}
-          inputMode="numeric" autoComplete="one-time-code" required autoFocus maxLength={method === "totp" ? 6 : 256}
-          placeholder={method === "totp" ? "000000" : undefined} className={method === "totp" ? "otp-input" : undefined} />
+          inputMode="numeric" autoComplete="one-time-code" required autoFocus maxLength={method === "totp" ? 6 : 256} />
         <Submit pending={action.pending}>验证并继续</Submit>
         {method !== "totp" && <button className="text-link" type="button" disabled={action.pending}
           onClick={() => action.run(() => beginFactor({ method }, context))}>发送验证码</button>}
@@ -137,7 +137,7 @@ export function MfaVerificationForm({ context, methods }: MfaProps) {
         <Fingerprint size={20} />{method === "passkey" ? "验证 Passkey" : "验证安全密钥"}
       </button>
     </>}
-    {methods.length > 1 && <div className={method === "totp" ? "auth-method-switch mfa-totp-switch" : "auth-method-switch"} aria-label="其他验证方式">
+    {methods.length > 1 && <div className="auth-method-switch" aria-label="其他验证方式">
       {methods.filter(type => type !== method).map(type => <button type="button" key={type} className="text-link" disabled={action.pending}
         onClick={() => selectMethod(type)}>{switchLabel(type)}</button>)}
     </div>}

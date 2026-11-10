@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight, Fingerprint } from "@phosphor-icons/react";
@@ -9,44 +8,18 @@ import {
   resetPasswordSchema, verifyEmailSchema, type AuthContext, type LoginPolicy,
   type ForgotPasswordInput, type LoginInput, type RegisterInput, type ResetPasswordInput, type VerifyEmailInput,
 } from "@/lib/auth";
-import { authenticate } from "@/lib/webauthn";
-import { withBasePath } from "@/lib/paths";
-import { useBasePath } from "@/components/auth/brand-provider";
+import { loginWithPasskey } from "@/lib/passkey-login";
 import { AppLink } from "@/components/ui/app-link";
-import { chooseIdentityProvider, startPasskey, finishPasskey, login, register, requestPasswordReset, resendEmail, resetPassword, verifyEmail } from "@/server/actions";
+import { chooseIdentityProvider, login, register, requestPasswordReset, resendEmail, resetPassword, verifyEmail } from "@/server/actions";
 import { Feedback, Field, Notice, Submit, useAuthAction } from "@/components/ui/form";
 
 type Props = { context: AuthContext; policy: LoginPolicy };
 
 function useWebAuthnLogin(context: AuthContext) {
-  const basePath = useBasePath();
-  const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState<string | undefined>();
-  const [error, setError] = useState<string | null>(null);
-  const [options, setOptions] = useState<Record<string, unknown>>();
-  async function begin(loginName: string) {
-    setError(null); setMessage(undefined); setPending(true);
-    try {
-      const started = await startPasskey({ loginName }, context);
-      if (!started.ok || !started.options) { setError(started.message || "无法开始通行密钥登录。"); return; }
-      setOptions(started.options);
-      setMessage("验证请求已准备好，请继续使用通行密钥。");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "无法开始通行密钥登录。"); }
-    finally { setPending(false); }
-  }
-  async function authenticateNow() {
-    if (!options) return;
-    setError(null); setMessage(undefined); setPending(true);
-    try {
-      const assertion = await authenticate(options);
-      const result = await finishPasskey(assertion, context);
-      if (!result.ok) { setError(result.message); return; }
-      if (result.redirect) window.location.assign(withBasePath(result.redirect, basePath));
-      else setMessage(result.message);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "无法完成通行密钥登录。"); setOptions(undefined); }
-    finally { setPending(false); }
-  }
-  return { pending, error, message, options, begin, authenticateNow };
+  const action = useAuthAction();
+  function begin(chooseAccount = false) { action.run(() => loginWithPasskey(context, chooseAccount)); }
+  return { pending: action.pending, error: action.result && !action.result.ok ? action.result.message : null,
+    message: action.result?.ok ? action.result.message : undefined, begin };
 }
 
 export function LoginForm({ context, policy }: Props) {
@@ -72,10 +45,8 @@ export function LoginForm({ context, policy }: Props) {
     {(hasAlternatives || (action.result?.ok && action.result.form)) && <div className="auth-methods">
       {webauthn.error && <div className="form-feedback"><Notice kind="error">{webauthn.error}</Notice></div>}
       {webauthn.message && <div className="form-feedback"><Notice kind="success">{webauthn.message}</Notice></div>}
-      {policy.passkey && !webauthn.options && <button type="button" className="button secondary-button wide" disabled={webauthn.pending || action.pending}
-        onClick={() => webauthn.begin(form.getValues("loginName"))}><Fingerprint size={20} aria-hidden="true" />使用通行密钥登录</button>}
-      {policy.passkey && webauthn.options && <button type="button" className="button secondary-button wide" disabled={webauthn.pending || action.pending}
-        onClick={() => webauthn.authenticateNow()}><Fingerprint size={20} aria-hidden="true" />继续使用通行密钥</button>}
+      {policy.passkey && <button type="button" className="button secondary-button wide" disabled={webauthn.pending || action.pending}
+        onClick={() => webauthn.begin()}><Fingerprint size={20} aria-hidden="true" />使用通行密钥登录</button>}
       {policy.identityProviders.map(provider => <button type="button" key={provider.id} className="button secondary-button wide" disabled={action.pending || webauthn.pending}
         onClick={() => action.run(() => chooseIdentityProvider({ id: provider.id }, context))}>使用 {provider.name} 登录<ArrowRight size={16} aria-hidden="true" /></button>)}
       {action.result?.ok && action.result.form && <form method="post" action={action.result.form.action} className="form">

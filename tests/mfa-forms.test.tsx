@@ -35,18 +35,20 @@ function input(html: string, name: string) {
 beforeEach(() => vi.clearAllMocks());
 
 describe("MFA client form rendering", () => {
-  it("offers all five policy-provided factors in verification and enrollment", () => {
-    for (const Component of [MfaVerificationForm, MfaEnrollmentForm]) {
-      const html = render(<Component context={context} methods={methods} />);
-      for (const method of methods) expect(html).toContain(`value="${method}"`);
-      for (const label of ["验证器动态码", "通行密钥（Passkey）", "安全密钥（U2F）", "邮件验证码", "短信验证码"]) expect(html).toContain(label);
-      expect(html.match(/<option\b/g)).toHaveLength(5);
-    }
+  it("uses the reference login's method-switch links, not an extra select", () => {
+    const html = render(<MfaVerificationForm context={context} methods={methods} />);
+    for (const label of ["验证 Passkey", "使用两步验证码", "使用安全密钥", "使用邮箱验证码", "使用短信验证码"]) expect(html).toContain(label);
+    expect(html).not.toContain("<select");
+    const enrollment = render(<MfaEnrollmentForm context={context} methods={methods} />);
+    for (const method of methods) expect(enrollment).toContain(`value="${method}"`);
   });
 
   it("renders a directly available TOTP challenge with a six-digit text field", () => {
     const html = render(<MfaVerificationForm context={context} methods={["totp"]} />);
-    expect(html).toContain("打开已绑定的验证器");
+    expect(html).toContain("打开你的验证器，输入当前动态验证码。");
+    expect(html).not.toContain("mfa-totp-form");
+    expect(html).not.toContain("otp-input");
+    expect(html).not.toContain('placeholder="000000"');
     expect(html).toContain("验证并继续");
     expect(input(html, "code")).toContain('inputMode="numeric"');
     expect(input(html, "code")).toContain('maxLength="6"');
@@ -57,17 +59,15 @@ describe("MFA client form rendering", () => {
 
   it.each(["otpEmail", "otpSms"] as const)("requires explicit sending for %s instead of starting on render", method => {
     const html = render(<MfaVerificationForm context={context} methods={[method]} />);
-    expect(html).toContain(method === "otpSms" ? "发送短信验证码" : "发送邮件验证码");
-    expect(html).toContain("请先发送验证码");
-    expect(input(html, "code")).toContain("disabled");
+    expect(html).toContain("发送验证码");
+    expect(html).toContain(method === "otpSms" ? "请获取并填写短信验证码。" : "点击邮件中的链接即可完成验证，也可以在此输入验证码。");
     expect(html.match(/<button\b[^>]*type="submit"[^>]*>/)?.[0]).toContain("disabled");
     expect(actions.beginFactor).not.toHaveBeenCalled();
   });
 
   it.each(["passkey", "u2f"] as const)("renders %s verification without exposing a code field", method => {
     const html = render(<MfaVerificationForm context={context} methods={[method]} />);
-    expect(html).toContain("开始验证");
-    expect(html).toContain(method === "passkey" ? "通行密钥（Passkey）" : "安全密钥（U2F）");
+    expect(html).toContain(method === "passkey" ? "验证 Passkey" : "验证安全密钥");
     expect(html).not.toContain('name="code"');
     expect(webauthn.authenticate).not.toHaveBeenCalled();
   });
@@ -114,7 +114,7 @@ describe("MFA client form rendering", () => {
   });
 
   it("keeps the runtime base path and only forwards the auth request to login", () => {
-    const html = render(<MfaVerificationForm context={context} methods={["totp"]} />);
+    const html = render(<MfaEnrollmentForm context={context} methods={["totp"]} />);
     expect(html).toContain('href="/id/login?authRequest=V2_a%26b%3Dc"');
     expect(html).not.toContain("user-id");
     expect(html).not.toContain("code=001234");

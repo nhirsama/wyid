@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authenticate, register } from "@/lib/webauthn";
+import { authenticate, passkeyUserId, register } from "@/lib/webauthn";
 
 const json = { id: "credential-id", rawId: "credential-id", type: "public-key", response: { clientDataJSON: "client-data" } };
 class TestPublicKeyCredential {
@@ -19,6 +19,18 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("WebAuthn JSON helpers", () => {
+  it.each(["user-id", "123456789012345678", "账号-猫"])("decodes the ZITADEL userHandle for %s as an untrusted account hint", userId => {
+    expect(passkeyUserId({ response: { userHandle: Buffer.from(userId).toString("base64url") } })).toBe(userId);
+  });
+
+  it.each([null, {}, { response: {} }, { response: { userHandle: null } }, { response: { userHandle: "" } },
+    { response: { userHandle: "%%%" } }, { response: { userHandle: "_w" } },
+    { response: { userHandle: Buffer.from("user\u0000id").toString("base64url") } },
+    { response: { userHandle: "a".repeat(1367) } },
+  ])("rejects an invalid account-discovery response: %j", value => {
+    expect(() => passkeyUserId(value)).toThrow("账号标识");
+  });
+
   it.each([false, true])("authenticates using %s publicKey wrapping without creating a credential", async wrapped => {
     const options = { challenge: "login-challenge", rpId: "login.example.com", allowCredentials: [{ type: "public-key", id: "allowed-id" }] };
     expect(await authenticate(wrapped ? { publicKey: options } : options)).toBe(json);

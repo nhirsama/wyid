@@ -20,10 +20,7 @@ export default async function AccountPage() {
     const user = state.user;
     accountName = user.preferredLoginName || user.username;
   } catch {
-    return <AuthPanel title="登录状态已失效" description="请重新登录以继续使用账号。">
-      <Notice kind="error">账号会话已失效，请重新验证。</Notice>
-      <form action={logout}><button className="button primary-button wide" type="submit">返回登录</button></form>
-    </AuthPanel>;
+    redirect("/login");
   }
 
   if (state.step !== "complete") return <AuthPanel title="继续身份验证" description="账号的验证要求尚未完成或已过期。">

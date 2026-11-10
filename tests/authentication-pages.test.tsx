@@ -39,13 +39,13 @@ beforeEach(() => {
 });
 
 describe("verification route trusts the live gate instead of cookie method flags", () => {
-  it.each([undefined, "V2_test"])("does not add application metadata for authRequest=%s", async authRequestId => {
+  it.each([undefined, "V2_test"])("matches the reference verification heading without a domain for authRequest=%s", async authRequestId => {
     mocks.pending.mockResolvedValue({ ...pending, authRequestId });
     const html = renderToStaticMarkup(await VerifyPage({ searchParams: Promise.resolve({ authRequest: authRequestId }) }));
-    expect(html).toContain("完成验证后即可继续登录。");
-    expect(html).not.toContain("Test App");
+    expect(html).toContain("继续登录");
+    expect(html).toContain(authRequestId ? "Test App" : "Test ID");
     expect(html).not.toContain("app.example.com");
-    expect(mocks.request).not.toHaveBeenCalled();
+    expect(mocks.request).toHaveBeenCalledTimes(authRequestId ? 1 : 0);
     expect(mocks.inspect).toHaveBeenCalled();
   });
 
@@ -82,7 +82,11 @@ describe("consent page rechecks authentication", () => {
   });
   it("shows consent only after the native authentication gate is complete", async () => {
     mocks.inspect.mockResolvedValue(state("complete"));
-    expect(renderToStaticMarkup(await ConsentPage({ searchParams }))).toContain("consent-form");
+    const html = renderToStaticMarkup(await ConsentPage({ searchParams }));
+    expect(html).toContain("consent-form");
+    expect(html).toContain("Test App");
+    expect(html).not.toContain("app.example.com");
+    expect(html).not.toContain("app-host");
   });
   it("does not show consent when native authentication cannot be inspected", async () => {
     mocks.inspect.mockRejectedValueOnce(new Error("unavailable"));
@@ -107,10 +111,9 @@ describe("account portal does not treat an old authenticated cookie as proof", (
     expect(html).toContain("当前账号：");
     expect(html).toContain("test-user");
   });
-  it("fails closed when live user/session/policy reads fail", async () => {
+  it("returns to the existing login instead of adding a failure page when inspection fails", async () => {
     mocks.inspect.mockRejectedValueOnce(new Error("unavailable"));
-    const html = renderToStaticMarkup(await AccountPage());
-    expect(html).toContain("登录状态已失效");
-    expect(html).not.toContain("已通过");
+    await expect(AccountPage()).rejects.toThrow("NEXT_REDIRECT:/login");
+    expect(mocks.write).not.toHaveBeenCalled();
   });
 });

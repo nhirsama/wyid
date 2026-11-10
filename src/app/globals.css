@@ -203,3 +203,46 @@ h1, p { overflow-wrap: anywhere; }
 
 /* Verification method switching, copied from hueneko-login. */
 .auth-method-switch{display:flex;flex-direction:column;align-items:flex-start;gap:10px;margin-top:18px}.auth-method-switch .text-link{font-size:13px}
+
+/* Action state only; the idle login page keeps its existing presentation. */
+.auth-card { position: relative; }
+.auth-card[aria-busy="true"] { min-height: 240px; }
+
+/* Reference styling is limited to consent and MFA login, never the login page. */
+.auth-page:has(.reference-auth-card) { min-height: 100dvh; padding: 38px 20px; }
+.reference-auth-card { --text: #374665; --muted: #77869e; color: var(--text); }
+.reference-auth-card .auth-heading h1 { line-height: inherit; letter-spacing: normal; }
+.reference-auth-card .auth-heading strong { font-weight: 500; color: #667f9f; }
+.reference-auth-card .auth-panel-content > .text-link { margin-top: 18px; }
+.reference-auth-card .auth-panel-content > .primary-button { margin-top: 8px; }
+.reference-auth-card .form, .reference-auth-card .form-fieldset { gap: 18px; }
+.reference-auth-card .input-wrap { display: contents; }
+.reference-auth-card .field input { min-height: 0; line-height: inherit; }
+.reference-auth-card .field input::placeholder { color: #a1adc0; }
+.reference-auth-card .button, .reference-auth-card .primary-button, .reference-auth-card .small-button { display: inline-flex; min-height: 0; align-items: center; justify-content: center; gap: 8px; border: 1px solid transparent; border-radius: 8px; padding: 10px 16px; font-size: 14px; line-height: 1.5; text-align: center; white-space: nowrap; }
+.reference-auth-card .primary-button { border-color: var(--blue); background: var(--blue); color: #fff; }
+.reference-auth-card .small-button { border-color: #dfe6f0; background: #fff; color: #647fa5; padding: 8px 12px; }
+.reference-auth-card .small-button:hover { border-color: #adc7e9; background: #f6faff; color: #5075a6; }
+.reference-auth-card .text-link { display: inline-flex; align-items: center; gap: 7px; color: #5d80ad; background: none; border: 0; padding: 0; font-size: 14px; }
+.reference-auth-card .account-choice { width: 100%; padding: 15px; text-align: left; margin-bottom: 16px; }
+.reference-auth-card .account-choice > span, .reference-auth-card .account-choice > div { flex: 1; min-width: 0; }
+.reference-auth-card .avatar { display: grid; place-items: center; flex-shrink: 0; width: 33px; height: 33px; border-radius: 50%; background: #eaf1fc; color: #607da9; font-size: 14px; font-weight: 700; }
+.reference-auth-card .scope-list { display: block; margin: 1em 0 24px; padding: 0 0 0 20px; list-style: disc; color: #778ca9; font-size: 14px; line-height: 2.2; }
+.reference-auth-card .scope-list li { border: 0; padding: 0; }
+.reference-auth-card .scope-list strong { color: inherit; font-weight: bold; }
+.reference-auth-card .scope-list code { display: inline; margin: 0; padding: 0; border-radius: 0; background: none; color: inherit; font-size: .91em; }
+.reference-auth-card code, .reference-auth-card pre { font-family: var(--mono); }
+.reference-auth-card .form-actions { align-items: center; justify-content: flex-end; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+.reference-auth-card .form-actions > button { flex: 0 1 auto; }
+.reference-auth-card .body-copy { margin: 0 0 17px; color: #7c8ca5; }
+.reference-auth-card .form > .body-copy { margin: 0; }
+@media (max-width: 760px) {
+  .reference-auth-card { padding: 28px 24px; }
+  .auth-page:has(.reference-auth-card) .auth-brand { margin-bottom: 26px; }
+  .reference-auth-card .auth-heading h1 { font-size: 25px; }
+}
+@media (max-width: 400px) {
+  .auth-page:has(.reference-auth-card) { padding: 25px 15px; }
+  .reference-auth-card { padding: 25px 20px; }
+  .auth-page:has(.reference-auth-card) .auth-brand span { font-size: 23px; }
+}

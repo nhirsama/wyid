@@ -56,7 +56,7 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
     </AuthPanel>;
   }
 
-  return <AuthPanel title="确认授权" description={<>继续登录 <strong>{view.appName}</strong>{view.appHost !== view.appName && <small className="app-host">{view.appHost}</small>}</>}>
-    <ConsentForm authRequestId={request.id} consentToken={view.token} scopes={view.scopes} displayName={view.displayName} email={view.email} />
+  return <AuthPanel reference title="确认授权" description={<>继续登录 <strong>{view.appName}</strong></>}>
+    <ConsentForm authRequestId={request.id} consentToken={view.token} scopes={view.scopes} appName={view.appName} displayName={view.displayName} email={view.email} />
   </AuthPanel>;
 }

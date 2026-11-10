@@ -1,9 +1,10 @@
 "use server";
 
 import { z } from "zod";
+import { randomBytes } from "node:crypto";
 import type { JsonObject } from "@bufbuild/protobuf";
 import { UserVerificationRequirement } from "@zitadel/proto/zitadel/session/v2/challenge_pb.js";
-import { authLink, canRegisterWithPassword, factorSchema, forgotPasswordSchema, loginSchema, loginNameSchema, passwordMeetsPolicy, registerSchema, resetPasswordSchema, verifyEmailSchema, verifyTotpSchema, type ActionResult, type AuthContext, type ChallengeResult, type Factor } from "@/lib/auth";
+import { authLink, canRegisterWithPassword, factorSchema, forgotPasswordSchema, loginSchema, loginNameSchema, passwordMeetsPolicy, registerSchema, resetPasswordSchema, verifyEmailSchema, verifyTotpSchema, type ActionResult, type AuthContext, type ChallengeResult, type Factor, type PasskeyChallengeResult } from "@/lib/auth";
 import { AuthError, actionError } from "./errors";
 import { clearAuthenticatedSession, clearPendingSession, readAuthenticatedSession, readPendingSession, writeAuthenticatedSession, writePendingSession, type PendingSession } from "./session";
 import { getConfig } from "./config";
@@ -13,8 +14,9 @@ import { ErrorReason, Prompt } from "@zitadel/proto/zitadel/oidc/v2/authorizatio
 import { redirect } from "next/navigation";
 import { consentToken, matchesConsentToken } from "./consent";
 import { runtimeBasePath, siteUrl } from "@/lib/paths";
+import { readPasskeyAccount, writePasskeyAccount } from "./passkey-account";
 
-const contextSchema = z.object({ authRequestId: z.string().min(1).max(1024).optional(), userId: z.string().min(1).max(1024).optional() });
+const contextSchema = z.object({ authRequestId: z.string().min(1).max(1024).optional(), userId: z.string().min(1).max(1024).optional(), loginHint: z.string().trim().max(320).optional() });
 function context(raw: AuthContext) { return contextSchema.parse(raw); }
 const keyMethodSchema = z.enum(["passkey", "u2f"]);
 const otpMethodSchema = z.enum(["otpEmail", "otpSms"]);
@@ -111,7 +113,8 @@ export async function decideConsent(raw: unknown): Promise<ActionResult> {
     return await callback(pending);
   } catch (error) { return actionError(error); }
 }
-async function beginLogin(input: { loginName: string; password?: string; passkey?: boolean }, ctx: ReturnType<typeof context>): Promise<ChallengeResult> {
+type PrimaryLoginInput = { loginName: string; password: string; passkey?: false } | { passkey: true; loginName?: string; userId?: string; chooseAccount?: boolean };
+async function beginLogin(input: PrimaryLoginInput, ctx: ReturnType<typeof context>): Promise<PasskeyChallengeResult> {
   const previous = await readPendingSession();
   if (previous?.passkeyPending && previous.sessionId && previous.sessionToken) {
     try { await zitadel.deleteSession(previous); } catch { /* A stale challenge must not block a new login. */ }
@@ -123,10 +126,35 @@ async function beginLogin(input: { loginName: string; password?: string; passkey
   const policy = await zitadel.policy(await zitadel.organizationForAuth(ctx.authRequestId));
   if (input.passkey && !policy.passkey) throw new AuthError("此组织未启用通行密钥登录。");
   if (!input.passkey && !policy.password) throw new AuthError("此组织未启用密码登录，请使用可用的其他登录方式。");
+  let search: { case: "userId" | "loginName"; value: string };
+  if (input.passkey) {
+    const loginName = input.loginName || auth?.loginHint || ctx.loginHint;
+    const remembered = !input.chooseAccount && !input.userId && !loginName ? await readPasskeyAccount() : null;
+    const userId = input.userId || remembered?.userId;
+    if (input.chooseAccount || (!userId && !loginName)) {
+      // The Session API requires a user before it can issue a signed challenge.
+      // Discover only an account hint here; never create or authenticate a
+      // session from this assertion. The next challenge is verified by ZITADEL.
+      return { ok: true, discoverUser: true, options: {
+        challenge: randomBytes(32).toString("base64url"), rpId: new URL(getConfig().appUrl).hostname,
+        userVerification: "discouraged", timeout: 60_000,
+      } };
+    }
+    search = userId ? { case: "userId", value: userId } : { case: "loginName", value: loginName! };
+  } else search = { case: "loginName", value: input.loginName };
   const mfaStartedAt = Date.now();
-  const created = input.passkey
-    ? await zitadel.createSession({ user: { search: { case: "loginName", value: input.loginName } } }, { webAuthN: { domain: new URL(getConfig().appUrl).hostname, userVerificationRequirement: UserVerificationRequirement.REQUIRED } }, ctx.authRequestId ? 600 : undefined)
-    : await zitadel.createSession({ user: { search: { case: "loginName", value: input.loginName } }, password: { password: input.password! } }, undefined, ctx.authRequestId ? 600 : undefined);
+  let created: Awaited<ReturnType<typeof zitadel.createSession>>;
+  try {
+    created = input.passkey
+      ? await zitadel.createSession({ user: { search } }, { webAuthN: { domain: new URL(getConfig().appUrl).hostname, userVerificationRequirement: UserVerificationRequirement.REQUIRED } }, ctx.authRequestId ? 600 : undefined)
+      : await zitadel.createSession({ user: { search }, password: { password: input.password } }, undefined, ctx.authRequestId ? 600 : undefined);
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+    // Only a rejected password/account check is a credentials error, not a
+    // failed policy/session read or an unavailable authentication service.
+    if (!input.passkey && (code === 5 || code === 16)) return { ...actionError(error), message: "账号或密码错误" };
+    throw error;
+  }
   const pending = { sessionId: created.sessionId, sessionToken: created.sessionToken, authRequestId: auth?.id, mfaStartedAt };
   if (input.passkey) {
     await writePendingSession({ ...pending, passkeyPending: true });
@@ -140,8 +168,11 @@ export async function login(raw: unknown, rawContext: AuthContext): Promise<Acti
   try { return await beginLogin(loginSchema.parse(raw), context(rawContext)); }
   catch (error) { return actionError(error); }
 }
-export async function startPasskey(raw: unknown, rawContext: AuthContext): Promise<ChallengeResult> {
-  try { return await beginLogin({ ...z.object({ loginName: loginNameSchema }).parse(raw), passkey: true }, context(rawContext)); }
+export async function startPasskey(raw: unknown, rawContext: AuthContext): Promise<PasskeyChallengeResult> {
+  try {
+    const input = z.object({ loginName: loginNameSchema.optional(), userId: z.string().min(1).max(1024).optional(), chooseAccount: z.boolean().optional() }).parse(raw);
+    return await beginLogin({ ...input, passkey: true }, context(rawContext));
+  }
   catch (error) { return actionError(error); }
 }
 export async function finishPasskey(raw: unknown, rawContext: AuthContext): Promise<ActionResult> {
@@ -151,9 +182,10 @@ export async function finishPasskey(raw: unknown, rawContext: AuthContext): Prom
     if (!pending.passkeyPending) throw new AuthError("通行密钥登录已过期，请重新开始。");
     const updated = await saveUpdated(pending, await zitadel.verifyWebAuthn(pending, assertion as JsonObject), { passkeyPending: false });
     // The primary passkey ceremony must prove user verification, not just possession.
-    const native = await zitadel.session(updated);
-    if (!native.factors?.webAuthN?.userVerified || !native.factors.webAuthN.verifiedAt) throw new AuthError("请使用支持用户验证的通行密钥重新登录。");
-    return await finishOrFactor(updated);
+    const state = await inspectPending(updated);
+    if (!state.session.factors?.webAuthN?.userVerified || !state.session.factors.webAuthN.verifiedAt) throw new AuthError("请使用支持用户验证的通行密钥重新登录。");
+    await writePasskeyAccount(state.userId);
+    return await finish(updated, state);
   } catch (error) { return actionError(error); }
 }
 async function factorState(pending: PendingSession, method: Factor, enrollment: boolean) {

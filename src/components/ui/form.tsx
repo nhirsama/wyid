@@ -6,6 +6,7 @@ import type { UseFormRegisterReturn } from "react-hook-form";
 import type { ActionResult } from "@/lib/auth";
 import { withBasePath } from "@/lib/paths";
 import { useBasePath } from "@/components/auth/brand-provider";
+import { useAuthActionFlow } from "@/components/auth/auth-action-provider";
 
 type FieldProps = {
   label: string;
@@ -69,19 +70,35 @@ export function Feedback({ result }: { result: ActionResult | null }) {
 
 export function useAuthAction() {
   const basePath = useBasePath();
-  const [pending, startTransition] = useTransition();
+  const flow = useAuthActionFlow();
+  const [transitionPending, startTransition] = useTransition();
+  const [navigating, setNavigating] = useState(false);
+  const locked = useRef(false);
   const [result, setResult] = useState<ActionResult | null>(null);
   function run(task: () => Promise<ActionResult>) {
+    // React's pending render is asynchronous; lock synchronously so repeated
+    // submits cannot race a successful callback with a second, failed request.
+    if (locked.current || (flow && !flow.begin())) return;
+    locked.current = true;
     setResult(null);
     startTransition(async () => {
       try {
         const next = await task();
-        if (next.ok && next.redirect) window.location.assign(withBasePath(next.redirect, basePath));
-        else setResult(next);
+        if (next.ok && next.redirect) {
+          setNavigating(true);
+          flow?.redirect();
+          window.location.assign(withBasePath(next.redirect, basePath));
+          // Keep the guard and the submitted form pending until navigation.
+          return;
+        }
+        setResult(next);
       } catch {
-        setResult({ ok: false, message: "连接中断，请检查网络后重试。" });
+        setNavigating(false);
+        setResult({ ok: false, message: "暂时无法确认操作结果，请检查网络后重试。" });
       }
+      locked.current = false;
+      flow?.finish();
     });
   }
-  return { pending, result, run };
+  return { pending: transitionPending || navigating || !!flow && flow.phase !== "idle", result, run };
 }
