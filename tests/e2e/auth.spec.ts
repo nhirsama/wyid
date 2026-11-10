@@ -28,7 +28,15 @@ test("serves static assets and keeps not-found links under the base path", async
   await expect(page.getByRole("link", { name: "跳到主要内容" })).toHaveAttribute("href", /#main-content$/);
   const stylesheetUrls = await page.locator('link[rel="stylesheet"]').evaluateAll(links => links.map(link => new URL((link as HTMLLinkElement).href).pathname));
   expect(stylesheetUrls.length).toBeGreaterThan(0);
-  for (const url of stylesheetUrls) expect(url?.startsWith(`${basePath}/_next/`)).toBe(true);
+  const stylesheetContents: string[] = [];
+  for (const url of stylesheetUrls) {
+    expect(url?.startsWith(`${basePath}/_next/`)).toBe(true);
+    const stylesheet = await request.get(url!);
+    expect(stylesheet.status()).toBe(200);
+    expect(stylesheet.headers()["content-type"]).toContain("text/css");
+    stylesheetContents.push(await stylesheet.text());
+  }
+  expect(stylesheetContents.some(css => css.includes(".auth-page"))).toBe(true);
 });
 
 test("missing service configuration lists the required variables", async ({ page }) => {

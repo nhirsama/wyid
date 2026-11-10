@@ -11,8 +11,8 @@ export default function nextConfig(phase: string): NextConfig {
     `${relative(process.cwd(), realpathSync(`node_modules/${name}`)).replaceAll("\\", "/")}/**/*`,
   );
   return {
-    // Development uses the runtime path directly. Production builds stay at
-    // root; runtime-start.mjs injects BASE_PATH into the standalone server config.
+    // Keep production artifacts reusable; runtime-start injects the configured
+    // path into the standalone server. Dev needs it directly from the env.
     basePath: phase === PHASE_DEVELOPMENT_SERVER ? normalizeBasePath(process.env.BASE_PATH) : "",
     poweredByHeader: false,
     output: "standalone",

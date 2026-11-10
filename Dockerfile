@@ -27,6 +27,7 @@ COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/scripts/runtime-start.mjs ./runtime-start.mjs
+COPY --from=builder --chown=node:node /app/scripts/runtime-config.mjs ./runtime-config.mjs
 
 USER node
 EXPOSE 3000

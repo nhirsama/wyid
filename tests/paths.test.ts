@@ -2,10 +2,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { normalizeBasePath, siteUrl, withBasePath } from "@/lib/paths";
 import { authLink } from "@/lib/auth";
 import { getBrand } from "@/server/brand";
+import { withRuntimeBasePath } from "../scripts/runtime-config.mjs";
 
 afterEach(() => vi.unstubAllEnvs());
 
 describe("base path configuration", () => {
+  it.each([["", ""], ["/auth", "/auth"], ["/account/login-ui", "/account/login-ui"]])("sets both Next runtime prefixes for %s", (basePath, expected) => {
+    const buildConfig = { basePath: "", assetPrefix: "", poweredByHeader: false };
+    const runtimeConfig = withRuntimeBasePath(buildConfig, basePath);
+    expect(runtimeConfig).toMatchObject({ basePath: expected, assetPrefix: expected });
+    expect(buildConfig).toMatchObject({ basePath: "", assetPrefix: "" });
+  });
+
   it.each([[undefined, ""], ["/", ""], ["/auth/", "/auth"], ["/account/login-ui", "/account/login-ui"]])("keeps the build reusable for runtime BASE_PATH=%s", async (value, expected) => {
     vi.stubEnv("BASE_PATH", value);
     vi.resetModules();

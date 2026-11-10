@@ -22,7 +22,7 @@
 | `ZITADEL_SKIP_CONSENT_PROJECT_IDS` | 否 | 免授权确认的 ZITADEL Project ID，多个 ID 用逗号分隔。 |
 | `CUSTOM_REQUEST_HEADERS` | 否 | 额外请求头，格式为 `Header:Value,Header:Value`；其中 `Host` 仅用于生成 ZITADEL 实例定位头，不直接发送，避免 HTTP/2 协议错误。 |
 
-子路径部署时，将 `BASE_PATH` 设为相应路径，并在反向代理与 ZITADEL 中配置完整登录地址，例如 `https://login.example.com/auth/login`。修改运行时环境变量后重启容器生效。
+子路径部署时，将 `BASE_PATH` 设为相应路径，并在反向代理与 ZITADEL 中配置完整登录地址，例如 `https://login.example.com/auth/login`。修改运行时环境变量后重启容器生效，无需重新构建镜像。
 
 ## 2. 发布并运行镜像
 

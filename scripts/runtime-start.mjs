@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createRequire } from "node:module";
+import { withRuntimeBasePath } from "./runtime-config.mjs";
 const require = createRequire(import.meta.url);
 const nextRequire = createRequire(require.resolve("next/dist/server/lib/start-server"));
 const { loadEnvConfig } = nextRequire("@next/env");
@@ -19,8 +20,7 @@ if (!isRootPath && (!basePath || !/^\/[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*$/.
 process.env.BASE_PATH = basePath || "/";
 
 const requiredFiles = JSON.parse(readFileSync(resolve(process.cwd(), ".next/required-server-files.json"), "utf8"));
-const nextConfig = structuredClone(requiredFiles.config);
-nextConfig.basePath = basePath;
+const nextConfig = withRuntimeBasePath(requiredFiles.config, basePath);
 process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify(nextConfig);
 
 const { startServer } = nextRequire("next/dist/server/lib/start-server");
