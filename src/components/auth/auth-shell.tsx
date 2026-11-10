@@ -30,6 +30,7 @@ type AuthPanelProps = {
   children: ReactNode;
   back?: string;
   reference?: boolean;
+  className?: string;
 };
 
 export function AuthPanel(props: AuthPanelProps) {
@@ -39,8 +40,8 @@ export function AuthPanel(props: AuthPanelProps) {
   // Cookie-triggered refreshes must not replace the submitted form with a
   // stale failure page before the action has returned its actual result.
   if (!busy && idleProps !== props) setIdleProps(props);
-  const { title, description, children, back, reference = false } = busy ? idleProps : props;
-  return <section className={reference ? "auth-card reference-auth-card" : "auth-card"} aria-labelledby="auth-title" aria-busy={busy}>
+  const { title, description, children, back, reference = false, className } = busy ? idleProps : props;
+  return <section className={["auth-card", reference && "reference-auth-card", className].filter(Boolean).join(" ")} aria-labelledby="auth-title" aria-busy={busy}>
     <div className="auth-panel-content">
     {back && <AppLink href={back} className="back-link"><span aria-hidden="true">←</span> 返回登录</AppLink>}
     <header className="auth-heading"><h1 id="auth-title">{title}</h1><p>{description}</p></header>

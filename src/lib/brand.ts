@@ -1,5 +1,6 @@
 export type SiteBrand = { nickname: string; icon?: string };
-export const defaultBrand: SiteBrand = { nickname: "账号中心" };
+// The server supplies SITE_NICKNAME; do not substitute a hard-coded brand.
+export const defaultBrand: SiteBrand = { nickname: "" };
 
 export function resolveBrand(input: Partial<SiteBrand>): SiteBrand {
   const nickname = input.nickname?.trim() || defaultBrand.nickname;

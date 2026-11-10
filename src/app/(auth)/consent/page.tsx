@@ -10,6 +10,7 @@ import { consentToken } from "@/server/consent";
 import { getConfig } from "@/server/config";
 import { readPendingSession } from "@/server/session";
 import { zitadel } from "@/server/zitadel/service";
+import styles from "@/components/auth/consent.module.css";
 
 export const metadata = { title: "确认授权" };
 
@@ -37,7 +38,7 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
   catch { /* Render the expired-request state below, never a consent form. */ }
   if (state && state.step !== "complete") redirect(authLink("/verify", context));
 
-  let view: { appName: string; appHost: string; token: string; scopes: string[]; displayName: string; email: string } | undefined;
+  let view: { appName: string; appHost: string; token: string; scopes: string[]; displayName: string; email: string; avatarUrl?: string } | undefined;
   try {
     if (!state || state.user.type.case !== "human") throw new Error("incomplete account authentication");
     const user = state.user;
@@ -48,7 +49,7 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
     const profile = user.type.value.profile;
     const email = user.type.value.email?.email || "";
     const displayName = profile?.displayName || profile?.nickName || user.preferredLoginName || user.username;
-    view = { appName, appHost, scopes: request.scope, displayName, email, token: consentToken(request, pending, getConfig().sessionSecret) };
+    view = { appName, appHost, scopes: request.scope, displayName, email, avatarUrl: profile?.avatarUrl, token: consentToken(request, pending, getConfig().sessionSecret) };
   } catch { view = undefined; }
   if (!view) {
     return <AuthPanel title="授权请求不可用" description="登录请求可能已过期或发生变化。">
@@ -56,7 +57,7 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
     </AuthPanel>;
   }
 
-  return <AuthPanel reference title="确认授权" description={<>继续登录 <strong>{view.appName}</strong></>}>
-    <ConsentForm authRequestId={request.id} consentToken={view.token} scopes={view.scopes} appName={view.appName} displayName={view.displayName} email={view.email} />
+  return <AuthPanel className={styles.card} title="确认授权" description={<>继续登录 <strong>{view.appName}</strong></>}>
+    <ConsentForm authRequestId={request.id} consentToken={view.token} scopes={view.scopes} appName={view.appName} appHost={view.appHost} displayName={view.displayName} email={view.email} avatarUrl={view.avatarUrl} />
   </AuthPanel>;
 }

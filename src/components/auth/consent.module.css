@@ -1,0 +1,78 @@
+/* Copied from hueneko-login/src/app/globals.css, scoped to consent only. */
+@font-face {
+  font-family: "Consent Mono";
+  src: url("../../../public/fonts/jetbrains-mono-latin.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+:global(.auth-page):has(.card) {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 38px 20px;
+  background: #f5f7fb;
+  color: #374665;
+  -webkit-font-smoothing: auto;
+}
+
+:global(.auth-page):has(.card) :global(.auth-container) { display: contents; }
+:global(.auth-page):has(.card) :global(.auth-brand) { margin: 0 0 26px; }
+:global(.auth-page):has(.card) :global(.auth-brand) span { font-size: 23px; font-weight: 600; letter-spacing: -.5px; }
+:global(.auth-page):has(.card) :global(.auth-brand) img { height: 39px; }
+:global(.auth-page):has(.card) :global(.auth-footer) { display: block; }
+:global(.auth-page):has(.card) :global(.auth-footer) > span + span::before { content: " "; white-space: pre; }
+
+.card {
+  --text: #374665;
+  --muted: #77869e;
+  --mono: "Consent Mono", "SFMono-Regular", Consolas, monospace;
+  width: 100%;
+  max-width: 445px;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 14px;
+  padding: 32px 33px;
+  box-shadow: 0 7px 25px #46628905;
+  color: var(--text);
+}
+
+.card :global(.auth-heading) { margin-bottom: 27px; }
+.card :global(.auth-heading) h1 { font-size: 25px; font-weight: 500; color: #435678; margin: 0 0 9px; line-height: inherit; letter-spacing: normal; }
+.card :global(.auth-heading) p { font-size: 14px; color: #8b9bb2; margin: 0; line-height: 1.9; }
+.card :global(.auth-heading) strong { font-weight: 500; color: #667f9f; }
+.card h1, .card p { overflow-wrap: anywhere; }
+.card code { font-family: var(--mono); font-size: .91em; overflow-wrap: anywhere; }
+
+.form { display: flex; flex-direction: column; gap: 18px; }
+.bodyCopy { color: #7c8ca5; font-size: 14px; line-height: 1.9; margin: 0 0 17px; }
+.form > .bodyCopy { margin: 0; }
+
+.accountChoice { display: flex; align-items: center; gap: 12px; border: 1px solid #e4eaf3; border-radius: 9px; padding: 15px; background: #fff; width: 100%; color: #8da5c5; text-align: left; margin-bottom: 16px; }
+.accountChoice > span, .accountChoice > div { flex: 1; min-width: 0; }
+.accountChoice strong { display: block; font-size: 15px; font-weight: 500; color: #5b759a; }
+.accountChoice small { display: block; font-size: 13px; color: #96a5bb; margin-top: 2px; overflow-wrap: anywhere; }
+.avatar { display: grid; place-items: center; flex-shrink: 0; width: 33px; height: 33px; border-radius: 50%; background: #eaf1fc; color: #607da9; font-size: 14px; font-weight: 700; }
+.scopeList { padding: 0 0 0 20px; color: #778ca9; font-size: 14px; line-height: 2.2; margin-bottom: 24px; }
+
+.formActions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+.primaryButton, .smallButton { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 8px; font-size: 14px; line-height: 1.5; padding: 10px 16px; white-space: nowrap; transition: background .15s, border-color .15s, color .15s; }
+.primaryButton { border: 1px solid var(--blue); background: var(--blue); color: #fff; }
+.primaryButton:hover { background: #5278ac; border-color: #5278ac; }
+.smallButton { border: 1px solid #dfe6f0; background: #fff; color: #647fa5; padding: 8px 12px; }
+.smallButton:hover { border-color: #adc7e9; background: #f6faff; color: #5075a6; }
+.primaryButton:disabled, .smallButton:disabled { cursor: wait; opacity: .55; }
+.primaryButton:focus-visible, .smallButton:focus-visible { outline: 2px solid #83a6d6; outline-offset: 3px; }
+
+@media (max-width: 760px) {
+  .card { padding: 28px 24px; }
+  .formActions { gap: 10px; }
+}
+
+@media (max-width: 400px) {
+  :global(.auth-page):has(.card) { padding: 25px 15px; }
+  .card { padding: 25px 20px; }
+}
