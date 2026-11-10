@@ -2,7 +2,7 @@ import type { ActionResult, AuthContext } from "./auth";
 import { authenticate, passkeyUserId } from "./webauthn";
 import { finishPasskey, startPasskey } from "@/server/actions";
 
-export async function loginWithPasskey(context: AuthContext, chooseAccount = false): Promise<ActionResult> {
+export async function loginWithPasskey(context: AuthContext, chooseAccount = true): Promise<ActionResult> {
   try {
     let challenge = await startPasskey({ chooseAccount }, context);
     if (!challenge.ok || challenge.redirect) return challenge;
@@ -15,8 +15,8 @@ export async function loginWithPasskey(context: AuthContext, chooseAccount = fal
       if (!challenge.options || challenge.discoverUser) return { ok: false, message: "无法开始通行密钥登录，请重新选择账号。" };
     }
 
-    // No intermediate "continue" click, no discovery for a remembered account,
-    // and no locally invented authentication proof from the discovery response.
+    // Discovery selects the account; only ZITADEL's fresh, user-bound challenge
+    // can authenticate it. Never submit the discovery response as login proof.
     return await finishPasskey(await authenticate(challenge.options), context);
   } catch (cause) {
     return { ok: false, message: cause instanceof Error ? cause.message : "设备验证未完成，请重试。" };

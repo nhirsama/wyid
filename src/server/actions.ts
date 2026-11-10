@@ -135,9 +135,11 @@ async function beginLogin(input: PrimaryLoginInput, ctx: ReturnType<typeof conte
       // The Session API requires a user before it can issue a signed challenge.
       // Discover only an account hint here; never create or authenticate a
       // session from this assertion. The next challenge is verified by ZITADEL.
+      // Discoverable credentials protected by credProtect are hidden without
+      // user verification when no credential ID list is supplied.
       return { ok: true, discoverUser: true, options: {
         challenge: randomBytes(32).toString("base64url"), rpId: new URL(getConfig().appUrl).hostname,
-        userVerification: "discouraged", timeout: 60_000,
+        userVerification: "required", timeout: 60_000,
       } };
     }
     search = userId ? { case: "userId", value: userId } : { case: "loginName", value: loginName! };

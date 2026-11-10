@@ -17,7 +17,7 @@ type Props = { context: AuthContext; policy: LoginPolicy };
 
 function useWebAuthnLogin(context: AuthContext) {
   const action = useAuthAction();
-  function begin(chooseAccount = false) { action.run(() => loginWithPasskey(context, chooseAccount)); }
+  function begin() { action.run(() => loginWithPasskey(context)); }
   return { pending: action.pending, error: action.result && !action.result.ok ? action.result.message : null,
     message: action.result?.ok ? action.result.message : undefined, begin };
 }
