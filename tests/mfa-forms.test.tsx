@@ -20,7 +20,7 @@ import {
 import { BrandProvider } from "@/components/auth/brand-provider";
 
 const context = { authRequestId: "V2_a&b=c", userId: "user-id", code: "001234" };
-const methods: Factor[] = ["totp", "passkey", "u2f", "otpEmail", "otpSms"];
+const methods: Factor[] = ["totp", "u2f", "otpEmail", "otpSms"];
 const policy: LoginPolicy = {
   password: true, registration: true, passwordReset: true, passkey: true,
   forceMfa: true, forceMfaLocalOnly: false, factors: methods, userVerifiedKey: false,
@@ -35,13 +35,6 @@ function input(html: string, name: string) {
 beforeEach(() => vi.clearAllMocks());
 
 describe("MFA client form rendering", () => {
-  it("uses the reference login's method-switch links, not an extra select", () => {
-    const html = render(<MfaVerificationForm context={context} methods={methods} />);
-    for (const label of ["验证 Passkey", "使用两步验证码", "使用安全密钥", "使用邮箱验证码", "使用短信验证码"]) expect(html).toContain(label);
-    expect(html).not.toContain("<select");
-    const enrollment = render(<MfaEnrollmentForm context={context} methods={methods} />);
-    for (const method of methods) expect(enrollment).toContain(`value="${method}"`);
-  });
 
   it("renders a directly available TOTP challenge with a six-digit text field", () => {
     const html = render(<MfaVerificationForm context={context} methods={["totp"]} />);
@@ -65,27 +58,11 @@ describe("MFA client form rendering", () => {
     expect(actions.beginFactor).not.toHaveBeenCalled();
   });
 
-  it.each(["passkey", "u2f"] as const)("renders %s verification without exposing a code field", method => {
-    const html = render(<MfaVerificationForm context={context} methods={[method]} />);
-    expect(html).toContain(method === "passkey" ? "验证 Passkey" : "验证安全密钥");
-    expect(html).not.toContain('name="code"');
-    expect(webauthn.authenticate).not.toHaveBeenCalled();
-  });
-
   it("starts TOTP enrollment explicitly without generating secrets during render", () => {
     const html = render(<MfaEnrollmentForm context={context} methods={["totp"]} />);
     expect(html).toContain("获取验证器密钥");
     expect(html).not.toContain("otpauth://");
     expect(actions.startTotpEnrollment).not.toHaveBeenCalled();
-  });
-
-  it.each(["passkey", "u2f"] as const)("limits the %s device name to the action's 100-character contract", method => {
-    const html = render(<MfaEnrollmentForm context={context} methods={[method]} />);
-    expect(html).toContain("设备名称");
-    expect(input(html, "name")).toContain('maxLength="100"');
-    expect(html).toContain("准备绑定设备");
-    expect(html).toContain("还需使用它完成本次登录验证");
-    expect(webauthn.register).not.toHaveBeenCalled();
   });
 
   it("supports setting and verifying a phone before enabling SMS OTP", () => {

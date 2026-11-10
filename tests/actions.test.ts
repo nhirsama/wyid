@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   config: vi.fn(), authRequest: vi.fn(), canSkipConsent: vi.fn(), organizationForAuth: vi.fn(), organizationForUser: vi.fn(), policy: vi.fn(),
   createSession: vi.fn(), callback: vi.fn(), deny: vi.fn(), session: vi.fn(), methods: vi.fn(), verifyFactor: vi.fn(), challenge: vi.fn(),
   user: vi.fn(), updateSession: vi.fn(), verifyWebAuthn: vi.fn(),
-  enrollTotp: vi.fn(), confirmTotp: vi.fn(), startKeyEnrollment: vi.fn(), finishKeyEnrollment: vi.fn(), enrollOtp: vi.fn(),
+  enrollTotp: vi.fn(), confirmTotp: vi.fn(), enrollOtp: vi.fn(),
   setEnrollmentPhone: vi.fn(), verifyEnrollmentPhone: vi.fn(), changePassword: vi.fn(), sendEmailCode: vi.fn(),
   writeAuthenticatedSession: vi.fn(), readAuthenticatedSession: vi.fn(), clearAuthenticatedSession: vi.fn(), deleteSession: vi.fn(), redirect: vi.fn(),
   register: vi.fn(), findUser: vi.fn(), requestPasswordReset: vi.fn(), resetPassword: vi.fn(), verifyEmail: vi.fn(),
@@ -28,7 +28,7 @@ vi.mock("@/server/zitadel/service", () => ({ zitadel: {
   policy: mocks.policy, createSession: mocks.createSession, callback: mocks.callback, deny: mocks.deny, session: mocks.session, methods: mocks.methods, deleteSession: mocks.deleteSession,
   verifyFactor: mocks.verifyFactor, challenge: mocks.challenge, register: mocks.register, findUser: mocks.findUser,
   user: mocks.user, updateSession: mocks.updateSession, verifyWebAuthn: mocks.verifyWebAuthn,
-  enrollTotp: mocks.enrollTotp, confirmTotp: mocks.confirmTotp, startKeyEnrollment: mocks.startKeyEnrollment, finishKeyEnrollment: mocks.finishKeyEnrollment,
+  enrollTotp: mocks.enrollTotp, confirmTotp: mocks.confirmTotp,
   enrollOtp: mocks.enrollOtp, setEnrollmentPhone: mocks.setEnrollmentPhone, verifyEnrollmentPhone: mocks.verifyEnrollmentPhone,
   changePassword: mocks.changePassword, sendEmailCode: mocks.sendEmailCode,
   requestPasswordReset: mocks.requestPasswordReset, resetPassword: mocks.resetPassword, verifyEmail: mocks.verifyEmail,
@@ -36,9 +36,9 @@ vi.mock("@/server/zitadel/service", () => ({ zitadel: {
 } }));
 import {
   beginFactor, changeLoginPassword, chooseIdentityProvider, completeIdentityProvider, confirmIdentityProviderRegistration, decideConsent,
-  enrollOtpFactor, finishKeyEnrollment, finishPasskey, finishTotpEnrollment, finishWebAuthnFactor, login, register,
+  enrollOtpFactor, finishPasskey, finishTotpEnrollment, finishWebAuthnFactor, login, register,
   requestPasswordReset, resendLoginEmail, resetPassword, resumeAccountAuthentication, resumeAuthentication,
-  setEnrollmentPhone, startKeyEnrollment, startPasskey, startTotpEnrollment, verifyEmail, verifyEnrollmentPhone, verifyFactor, verifyLoginEmail,
+  setEnrollmentPhone, startPasskey, startTotpEnrollment, verifyEmail, verifyEnrollmentPhone, verifyFactor, verifyLoginEmail,
 } from "@/server/actions";
 import { consentToken } from "@/server/consent";
 import { inspectAuthentication } from "@/server/authentication";
@@ -112,7 +112,6 @@ beforeEach(() => {
   mocks.verifyWebAuthn.mockResolvedValue({ sessionId: "session-id", sessionToken: "new-token" });
   mocks.updateSession.mockResolvedValue({ sessionId: "session-id", sessionToken: "new-token" });
   mocks.challenge.mockResolvedValue({ sessionId: "session-id", sessionToken: "challenge-token", challenges: { webAuthN: { publicKeyCredentialRequestOptions: { challenge: "challenge" } } } });
-  mocks.startKeyEnrollment.mockResolvedValue({ id: "key-id", options: { challenge: "registration-challenge" } });
   mocks.enrollTotp.mockResolvedValue({ secret: "totp-secret", uri: "otpauth://totp/Example:user?secret=totp-secret" });
 });
 afterEach(() => {
@@ -332,7 +331,6 @@ describe("unified authentication gate", () => {
   it.each([
     { methods: [], needsEnrollment: false, factorVerified: true },
     { methods: ["u2f" as const], needsEnrollment: true, factorVerified: true },
-    { methods: ["passkey" as const], needsEnrollment: false, factorVerified: false },
   ])("replaces stale or forged pending presentation metadata with native state: %j", async metadata => {
     const current = mockPendingSession(pendingSession(metadata));
     mocks.methods.mockResolvedValue(["totp"]);
@@ -454,7 +452,7 @@ describe("native MFA proof, not a cookie flag", () => {
     expect(mocks.verifyFactor).toHaveBeenCalledWith(expect.objectContaining({ sessionToken: "challenge-token" }), method, "012345");
   });
 
-  it.each(["passkey", "u2f"] as const)("does not route %s through numeric-code verification", async method => {
+  it.each(["u2f"] as const)("does not route %s through numeric-code verification", async method => {
     mockPendingSession(pendingSession({ methods: [method], challengeMethod: method }));
     expect((await verifyFactor({ method, code: "123456" }, context)).ok).toBe(false);
     expect(mocks.verifyFactor).not.toHaveBeenCalled();
@@ -550,13 +548,6 @@ describe("primary passkey and MFA key ceremonies", () => {
     expectNoAuthentication();
   });
 
-  it("does not start a primary passkey ceremony when only multi-factor passkeys are enabled", async () => {
-    mocks.policy.mockResolvedValue({ ...policy, passkey: false, userVerifiedKey: true, factors: ["passkey"] });
-    expect((await startPasskey({ loginName: credentials.loginName }, context)).ok).toBe(false);
-    expect(mocks.createSession).not.toHaveBeenCalled();
-    expectNoAuthentication();
-  });
-
   it.each([
     { name: "user verification missing", webAuthN: { userVerified: false, verifiedAt: verifiedAt() } },
     { name: "timestamp missing", webAuthN: { userVerified: true } },
@@ -579,60 +570,6 @@ describe("primary passkey and MFA key ceremonies", () => {
     expect(mocks.challenge).not.toHaveBeenCalled();
     expect(mocks.writePasskeyAccount).toHaveBeenCalledWith("user-id");
     expect(mocks.callback).toHaveBeenCalledWith("V2_test", { sessionId: "session-id", sessionToken: "new-token" });
-  });
-
-  it.each(["passkey", "u2f"] as const)("does not treat %s registration as session authentication; a separate assertion is required", async method => {
-    const current = mockPendingSession(pendingSession());
-    let enrolled = false;
-    mocks.policy.mockResolvedValue({ ...policy, passkey: false, forceMfa: true, factors: [method], userVerifiedKey: method === "passkey" });
-    mocks.methods.mockImplementation(async () => enrolled ? [method] : []);
-    mocks.finishKeyEnrollment.mockImplementation(async () => { enrolled = true; });
-    mocks.verifyWebAuthn.mockResolvedValue({ sessionId: "session-id", sessionToken: "verified-token" });
-    mocks.session.mockImplementation(async ({ sessionToken }: { sessionToken: string }) => nativeSession(sessionToken === "verified-token" ? { webAuthN: { userVerified: method === "passkey", verifiedAt: verifiedAt() } } : {}));
-
-    expect(await startKeyEnrollment({ method }, context)).toEqual({ ok: true, options: { challenge: "registration-challenge" } });
-    expect(current()?.keyEnrollment).toMatchObject({ method, id: "key-id" });
-    expect(await finishKeyEnrollment({ method, name: "我的设备", credential: assertion }, context)).toEqual({ ok: true, redirect: "/verify?authRequest=V2_test" });
-    expect(mocks.finishKeyEnrollment).toHaveBeenCalledWith("user-id", method, "key-id", assertion, "我的设备");
-    expect(current()).toMatchObject({ methods: [method], needsEnrollment: false });
-    expect(current()?.keyEnrollment).toBeUndefined();
-    expect(mocks.verifyWebAuthn).not.toHaveBeenCalled();
-    expectNoAuthentication();
-
-    expect((await beginFactor({ method }, context)).ok).toBe(true);
-    expect(current()).toMatchObject({ sessionToken: "challenge-token", challengeMethod: method });
-    expect(await finishWebAuthnFactor(assertion, context)).toEqual({ ok: true, redirect: "https://app.example.com/callback?code=opaque" });
-    expect(mocks.verifyWebAuthn).toHaveBeenCalledWith(expect.objectContaining({ sessionToken: "challenge-token" }), assertion);
-    expect(mocks.callback).toHaveBeenCalledWith("V2_test", { sessionId: "session-id", sessionToken: "verified-token" });
-  });
-
-  it("does not accept U2F possession as a user-verified MFA passkey", async () => {
-    const current = mockPendingSession(pendingSession({ challengeMethod: "passkey" }));
-    mocks.policy.mockResolvedValue({ ...policy, passkey: false, userVerifiedKey: true, factors: ["passkey"] });
-    mocks.methods.mockResolvedValue(["passkey"]);
-    mocks.session.mockImplementation(async ({ sessionToken }: { sessionToken: string }) => nativeSession(sessionToken === "new-token" ? { webAuthN: { userVerified: false, verifiedAt: verifiedAt() } } : {}));
-    expect((await finishWebAuthnFactor(assertion, context)).ok).toBe(false);
-    expect(current()?.sessionToken).toBe("new-token");
-    expectNoAuthentication();
-  });
-
-  it("does not accept an MFA passkey without a native verification timestamp", async () => {
-    const current = mockPendingSession(pendingSession({ challengeMethod: "passkey" }));
-    mocks.policy.mockResolvedValue({ ...policy, passkey: false, userVerifiedKey: true, factors: ["passkey"] });
-    mocks.methods.mockResolvedValue(["passkey"]);
-    mocks.session.mockImplementation(async ({ sessionToken }: { sessionToken: string }) => nativeSession(sessionToken === "new-token" ? { webAuthN: { userVerified: true } } : {}));
-    expect(await finishWebAuthnFactor(assertion, context)).toEqual({ ok: true, redirect: "/verify?authRequest=V2_test" });
-    expect(current()?.sessionToken).toBe("new-token");
-    expectNoAuthentication();
-  });
-
-  it("does not register another key based on a forged needsEnrollment cookie", async () => {
-    mockPendingSession(pendingSession({ methods: ["passkey"], needsEnrollment: true }));
-    mocks.policy.mockResolvedValue({ ...policy, userVerifiedKey: true, factors: ["passkey"] });
-    mocks.methods.mockResolvedValue(["passkey"]);
-    expect((await startKeyEnrollment({ method: "passkey" }, context)).ok).toBe(false);
-    expect(mocks.startKeyEnrollment).not.toHaveBeenCalled();
-    expectNoAuthentication();
   });
 });
 
@@ -785,15 +722,15 @@ describe("zero-lifetime native MFA proof belongs to one login or step-up flow", 
     mocks.session.mockResolvedValue(nativeSession());
   });
 
-  function zeroLifetime(method: "totp" | "u2f" | "passkey") {
-    mocks.policy.mockResolvedValue({ ...policy, passkey: false, userVerifiedKey: method === "passkey", factors: [method], secondFactorLifetimeMs: 0, multiFactorLifetimeMs: 0 });
+  function zeroLifetime(method: "totp" | "u2f") {
+    mocks.policy.mockResolvedValue({ ...policy, passkey: false, factors: [method], secondFactorLifetimeMs: 0, multiFactorLifetimeMs: 0 });
     mocks.methods.mockResolvedValue([method]);
   }
-  function nativeProof(method: "totp" | "u2f" | "passkey", offsetMs: number) {
-    return nativeSession(method === "totp" ? { totp: { verifiedAt: verifiedAt(offsetMs) } } : { webAuthN: { userVerified: method === "passkey", verifiedAt: verifiedAt(offsetMs) } });
+  function nativeProof(method: "totp" | "u2f", offsetMs: number) {
+    return nativeSession(method === "totp" ? { totp: { verifiedAt: verifiedAt(offsetMs) } } : { webAuthN: { verifiedAt: verifiedAt(offsetMs) } });
   }
 
-  for (const method of ["totp", "u2f", "passkey"] as const) {
+  for (const method of ["totp", "u2f"] as const) {
     it(`rejects ${method} proof from before the current flow, even with factorVerified=true`, async () => {
       const boundary = Date.now() - 10_000;
       const current = mockPendingSession(pendingSession({ mfaStartedAt: boundary, factorVerified: true }));
@@ -818,7 +755,7 @@ describe("zero-lifetime native MFA proof belongs to one login or step-up flow", 
     it(`does not treat a ${method} flow boundary as proof when native verifiedAt is absent`, async () => {
       mockPendingSession(pendingSession({ mfaStartedAt: Date.now() - 10_000, factorVerified: true }));
       zeroLifetime(method);
-      mocks.session.mockResolvedValue(nativeSession(method === "totp" ? { totp: {} } : { webAuthN: { userVerified: method === "passkey" } }));
+      mocks.session.mockResolvedValue(nativeSession(method === "totp" ? { totp: {} } : { webAuthN: {} }));
       expect(await resumeAuthentication(context)).toEqual({ ok: true, redirect: "/verify?authRequest=V2_test" });
       expectNoAuthentication();
     });

@@ -1,5 +1,5 @@
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
-import type { Factor, LoginPolicy } from "@/lib/auth";
+import { factorSchema, type Factor, type LoginPolicy } from "@/lib/auth";
 import { getConfig } from "./config";
 import { AuthError } from "./errors";
 import { zitadel, type SessionRef } from "./zitadel/service";
@@ -44,17 +44,16 @@ export function authenticationStep(session: Session, user: User, policy: LoginPo
 
   // A user-verified Passkey supplies both factors in a single ceremony.
   if (verifiedKey && (policy.passkey || policy.userVerifiedKey)) return complete;
-  const methods = [...new Set(enrolled.filter(method => policy.factors.includes(method)))];
+  const methods = [...new Set(enrolled.filter(method => factorSchema.safeParse(method).success && policy.factors.includes(method)))];
   const local = password || (factors?.webAuthN?.userVerified === true && checked(factors.webAuthN));
   const forced = local ? policy.forceMfa || policy.forceMfaLocalOnly : policy.forceMfa && !policy.forceMfaLocalOnly;
   if (!requireMfa && !forced && methods.length === 0) return complete;
   const verified = methods.some(method => {
-    if (method === "passkey") return verifiedKey && policy.userVerifiedKey;
     if (method === "u2f") return checked(factors?.webAuthN, factors?.webAuthN?.userVerified ? policy.multiFactorLifetimeMs : policy.secondFactorLifetimeMs, mfaStartedAt);
     return checked(factors?.[method], policy.secondFactorLifetimeMs, mfaStartedAt);
   });
   if (verified) return complete;
-  const enrollmentMethods = (["totp", "passkey", "u2f", "otpEmail", "otpSms"] as Factor[]).filter(method => policy.factors.includes(method));
+  const enrollmentMethods = (["totp", "u2f", "otpEmail", "otpSms"] as Factor[]).filter(method => policy.factors.includes(method));
   if (!methods.length && !enrollmentMethods.length) throw new AuthError("账号策略要求额外验证，但没有可用的验证方式。请联系账号管理员。");
   return { step: "mfa", methods: methods.length ? methods : enrollmentMethods, needsEnrollment: methods.length === 0 };
 }

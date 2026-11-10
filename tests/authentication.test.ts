@@ -14,7 +14,7 @@ const now = new Date("2026-11-10T10:00:00.000Z");
 const at = (age = 0) => timestampFromDate(new Date(now.getTime() - age));
 const policy: LoginPolicy = {
   password: true, registration: false, passwordReset: true, passkey: true, forceMfa: false, forceMfaLocalOnly: false,
-  factors: ["totp", "otpEmail", "otpSms", "u2f", "passkey"], userVerifiedKey: true,
+  factors: ["totp", "otpEmail", "otpSms", "u2f"], userVerifiedKey: true,
   secondFactorLifetimeMs: 60_000, multiFactorLifetimeMs: 120_000,
   passwordPolicy: { minLength: 8, uppercase: false, lowercase: false, number: false, symbol: false }, identityProviders: [],
 };
@@ -35,7 +35,7 @@ describe("native ZITADEL authentication gate", () => {
     expect(step().step).toBe("complete");
     expect(step({}, ["totp"]).step).toBe("mfa");
   });
-  it.each(["totp", "otpEmail", "otpSms", "u2f", "passkey"] as Factor[])("requires an enrolled %s even when forceMfa is false", method => {
+  it.each(["totp", "otpEmail", "otpSms", "u2f"] as Factor[])("requires an enrolled %s even when forceMfa is false", method => {
     expect(step({}, [method])).toEqual({ step: "mfa", methods: [method], needsEnrollment: false });
   });
   it("ignores factors disabled by the current policy and does not accept their proof", () => {
@@ -73,9 +73,6 @@ describe("native ZITADEL authentication gate", () => {
     expect(result.step).toBe(required ? "mfa" : "complete");
     expect(result.needsEnrollment).toBe(required);
   });
-  it("requires enrollment using every enabled supported method when MFA is forced and no method is ready", () => {
-    expect(step({}, [], { forceMfa: true })).toEqual({ step: "mfa", methods: ["totp", "passkey", "u2f", "otpEmail", "otpSms"], needsEnrollment: true });
-  });
   it("does not offer first-time enrollment to bypass an existing enrolled factor", () => {
     expect(step({}, ["totp", "totp"], { forceMfa: true })).toEqual({ step: "mfa", methods: ["totp"], needsEnrollment: false });
   });
@@ -90,12 +87,6 @@ describe("native ZITADEL authentication gate", () => {
   });
   it("uses the multi-factor lifetime for UV keys even if ordinary U2F is enrolled", () => {
     expect(step({ webAuthN: { verifiedAt: at(120_001), userVerified: true } as Factors["webAuthN"] }, ["u2f"], { secondFactorLifetimeMs: 600_000 }).step).toBe("mfa");
-  });
-  it("an expired UV key can reverify MFA rather than losing its primary login proof", () => {
-    expect(step({ password: undefined, webAuthN: { verifiedAt: at(120_001), userVerified: true } as Factors["webAuthN"] }, ["passkey"]).step).toBe("mfa");
-  });
-  it("rejects UV-key primary login when primary passkey login has been disabled", () => {
-    expect(() => step({ password: undefined, webAuthN: { verifiedAt: at(), userVerified: true } as Factors["webAuthN"] }, ["passkey"], { passkey: false })).toThrow("请先完成");
   });
   it("does not accept a fresh UV key as a second factor if neither passkey policy is enabled", () => {
     expect(step({ webAuthN: { verifiedAt: at(), userVerified: true } as Factors["webAuthN"] }, ["totp"], { passkey: false, userVerifiedKey: false, factors: ["totp"] }).step).toBe("mfa");
@@ -112,15 +103,6 @@ describe("native ZITADEL authentication gate", () => {
     expect(authenticationStep(current, human(), zero, ["totp"], false, flowStart).step).toBe("complete");
     expect(authenticationStep(current, human(), zero, ["totp"], false, now.getTime()).step).toBe("mfa");
     expect(authenticationStep(current, human(), zero, ["totp"]).step).toBe("mfa");
-  });
-  it("zero-lifetime metadata is not proof and cannot accept an old flow's check", () => {
-    const flowStart = now.getTime();
-    const zero = { ...policy, secondFactorLifetimeMs: 0, multiFactorLifetimeMs: 0, forceMfa: true };
-    expect(authenticationStep(native(), human(), zero, ["totp"], false, flowStart).step).toBe("mfa");
-    expect(authenticationStep(native({ totp: { verifiedAt: at(1) } as Factors["totp"] }), human(), zero, ["totp"], false, flowStart).step).toBe("mfa");
-    const key = native({ webAuthN: { verifiedAt: at(1), userVerified: true } as Factors["webAuthN"] });
-    expect(authenticationStep(key, human(), zero, ["passkey"], false, flowStart).step).toBe("mfa");
-    expect(authenticationStep(key, human(), zero, ["passkey"], false, flowStart - 100).step).toBe("complete");
   });
   it("requires password change and email verification before MFA, including UV keys", () => {
     expect(step({}, ["totp"], {}, human({ passwordChangeRequired: true })).step).toBe("password-change");

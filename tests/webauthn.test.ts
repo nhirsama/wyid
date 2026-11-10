@@ -19,6 +19,38 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("WebAuthn JSON helpers", () => {
+  it.each([false, true])("uses the security-key browser flow for U2F; wrapped=%s", async wrapped => {
+    const options = { challenge: "u2f-challenge", rpId: "login.example.com", allowCredentials: [{ type: "public-key", id: "u2f-id" }], userVerification: "discouraged" };
+    await authenticate(wrapped ? { publicKey: options } : options, "u2f");
+    expect(TestPublicKeyCredential.parseRequestOptionsFromJSON).toHaveBeenCalledWith({ ...options, hints: ["security-key"] });
+    expect(options).not.toHaveProperty("hints");
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("registers U2F on an external security key instead of creating a platform passkey", async () => {
+    const options = { challenge: "u2f-registration", authenticatorSelection: { authenticatorAttachment: "platform", residentKey: "required", requireResidentKey: true, userVerification: "required" } };
+    await register(options, "u2f");
+    expect(TestPublicKeyCredential.parseCreationOptionsFromJSON).toHaveBeenCalledWith({ ...options, hints: ["security-key"], authenticatorSelection: {
+      authenticatorAttachment: "cross-platform", residentKey: "discouraged", requireResidentKey: false, userVerification: "discouraged",
+    } });
+    expect(options.authenticatorSelection.authenticatorAttachment).toBe("platform");
+  });
+
+  it("does not accept a platform credential in the security-key flow", async () => {
+    const credential = Object.assign(new TestPublicKeyCredential(), { authenticatorAttachment: "platform" });
+    get.mockResolvedValueOnce(credential); create.mockResolvedValueOnce(credential);
+    await expect(authenticate({ challenge: "challenge" }, "u2f")).rejects.toThrow("外接安全密钥");
+    await expect(register({ challenge: "challenge" }, "u2f")).rejects.toThrow("外接安全密钥");
+  });
+
+  it("does not call a security-key failure a passkey failure", async () => {
+    get.mockResolvedValueOnce(null); create.mockResolvedValueOnce(null);
+    await expect(authenticate({}, "u2f")).rejects.toThrow("未完成安全密钥验证");
+    await expect(register({}, "u2f")).rejects.toThrow("未完成安全密钥注册");
+    vi.stubGlobal("PublicKeyCredential", undefined);
+    await expect(authenticate({}, "u2f")).rejects.toThrow("当前浏览器不支持安全密钥");
+  });
+
   it.each(["user-id", "123456789012345678", "账号-猫"])("decodes the ZITADEL userHandle for %s as an untrusted account hint", userId => {
     expect(passkeyUserId({ response: { userHandle: Buffer.from(userId).toString("base64url") } })).toBe(userId);
   });

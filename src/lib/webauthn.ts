@@ -5,6 +5,20 @@ function publicKeyOptions(options: Record<string, unknown>) {
     ? publicKey as Record<string, unknown> : options;
 }
 
+type KeyMethod = "passkey" | "u2f";
+
+function keyOptions(options: Record<string, unknown>, method: KeyMethod, registration = false) {
+  const publicKey = publicKeyOptions(options);
+  if (method !== "u2f") return publicKey;
+  const request = { ...publicKey, hints: ["security-key"] };
+  if (!registration) return request;
+  const selection = publicKey.authenticatorSelection;
+  return { ...request, authenticatorSelection: {
+    ...(selection && typeof selection === "object" && !Array.isArray(selection) ? selection : {}),
+    authenticatorAttachment: "cross-platform", residentKey: "discouraged", requireResidentKey: false, userVerification: "discouraged",
+  } };
+}
+
 function webauthnError(cause: unknown) {
   const name = cause instanceof Error ? cause.name : "";
   if (name === "NotAllowedError" || name === "AbortError") return new Error("操作已取消或超时，请重试，也可以选择其他验证方式。");
@@ -14,14 +28,16 @@ function webauthnError(cause: unknown) {
   return new Error("设备验证未能完成，请重新开始或选择其他验证方式。", { cause });
 }
 
-export async function authenticate(options: Record<string, unknown>) {
-  if (!globalThis.PublicKeyCredential?.parseRequestOptionsFromJSON || typeof navigator === "undefined" || !navigator.credentials?.get) throw new Error("当前浏览器不支持通行密钥，请更新浏览器或使用其他登录方式。");
+export async function authenticate(options: Record<string, unknown>, method: KeyMethod = "passkey") {
+  const label = method === "u2f" ? "安全密钥" : "通行密钥";
+  if (!globalThis.PublicKeyCredential?.parseRequestOptionsFromJSON || typeof navigator === "undefined" || !navigator.credentials?.get) throw new Error(`当前浏览器不支持${label}，请更新浏览器或使用其他登录方式。`);
   let credential: Credential | null;
   try {
-    const publicKey = PublicKeyCredential.parseRequestOptionsFromJSON(publicKeyOptions(options) as unknown as PublicKeyCredentialRequestOptionsJSON);
+    const publicKey = PublicKeyCredential.parseRequestOptionsFromJSON(keyOptions(options, method) as unknown as PublicKeyCredentialRequestOptionsJSON);
     credential = await navigator.credentials.get({ publicKey });
   } catch (cause) { throw webauthnError(cause); }
-  if (!(credential instanceof PublicKeyCredential)) throw new Error("未完成通行密钥验证。");
+  if (!(credential instanceof PublicKeyCredential)) throw new Error(`未完成${label}验证。`);
+  if (method === "u2f" && credential.authenticatorAttachment === "platform") throw new Error("请使用已绑定的外接安全密钥进行验证。");
   return credential.toJSON();
 }
 
@@ -40,13 +56,15 @@ export function passkeyUserId(credential: unknown) {
   }
 }
 
-export async function register(options: Record<string, unknown>) {
-  if (!globalThis.PublicKeyCredential?.parseCreationOptionsFromJSON || typeof navigator === "undefined" || !navigator.credentials?.create) throw new Error("当前浏览器不支持设备凭据注册，请更新浏览器或使用其他验证方式。");
+export async function register(options: Record<string, unknown>, method: KeyMethod = "passkey") {
+  const label = method === "u2f" ? "安全密钥" : "设备凭据";
+  if (!globalThis.PublicKeyCredential?.parseCreationOptionsFromJSON || typeof navigator === "undefined" || !navigator.credentials?.create) throw new Error(`当前浏览器不支持${label}注册，请更新浏览器或使用其他验证方式。`);
   let credential: Credential | null;
   try {
-    const publicKey = PublicKeyCredential.parseCreationOptionsFromJSON(publicKeyOptions(options) as unknown as PublicKeyCredentialCreationOptionsJSON);
+    const publicKey = PublicKeyCredential.parseCreationOptionsFromJSON(keyOptions(options, method, true) as unknown as PublicKeyCredentialCreationOptionsJSON);
     credential = await navigator.credentials.create({ publicKey });
   } catch (cause) { throw webauthnError(cause); }
-  if (!(credential instanceof PublicKeyCredential)) throw new Error("未完成设备凭据注册。");
+  if (!(credential instanceof PublicKeyCredential)) throw new Error(`未完成${label}注册。`);
+  if (method === "u2f" && credential.authenticatorAttachment === "platform") throw new Error("请使用外接安全密钥完成绑定。");
   return credential.toJSON();
 }

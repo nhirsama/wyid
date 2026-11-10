@@ -3,7 +3,8 @@ import { z } from "zod";
 export const loginNameSchema = z.string().trim().min(1, "请输入邮箱或用户名。").max(320, "账号长度不能超过 320 个字符。");
 const password = z.string().min(1, "请输入密码。").max(1024, "密码过长，请重新输入。");
 const code = z.string().trim().min(1, "请输入验证码。").max(256);
-export const factorSchema = z.enum(["totp", "otpEmail", "otpSms", "u2f", "passkey"]);
+// Only two-step verification methods. Passkeys use the separate login flow.
+export const factorSchema = z.enum(["totp", "otpEmail", "otpSms", "u2f"]);
 export type Factor = z.infer<typeof factorSchema>;
 export const loginSchema = z.object({ loginName: loginNameSchema, password });
 export const registerSchema = z.object({

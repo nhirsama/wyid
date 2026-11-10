@@ -4,9 +4,9 @@ import { useId, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { ArrowRight, Fingerprint } from "@phosphor-icons/react";
+import { ArrowRight, Key } from "@phosphor-icons/react";
 import {
-  authLink, passwordHint, passwordMeetsPolicy, verifyEmailSchema, verifyTotpSchema,
+  authLink, factorSchema, passwordHint, passwordMeetsPolicy, verifyEmailSchema, verifyTotpSchema,
   type ActionResult, type AuthContext, type Factor, type LoginPolicy,
 } from "@/lib/auth";
 import { authenticate, register as registerCredential } from "@/lib/webauthn";
@@ -23,7 +23,7 @@ type MfaProps = ContextProps & { methods: Factor[] };
 type CodeFactor = "totp" | "otpEmail" | "otpSms";
 
 const factorLabels: Record<Factor, string> = {
-  totp: "验证器动态码", passkey: "通行密钥（Passkey）", u2f: "安全密钥（U2F）",
+  totp: "验证器动态码", u2f: "安全密钥（U2F）",
   otpEmail: "邮件验证码", otpSms: "短信验证码",
 };
 const keyNameSchema = z.object({ name: z.string().trim().min(1, "请输入设备名称。").max(100, "设备名称不能超过 100 个字符。") });
@@ -85,8 +85,9 @@ function AuthenticationRecovery({ context, action }: ContextProps & { action: Re
     onClick={() => action.run(() => resumeAuthentication(context))}>重新读取验证状态并继续验证</button>;
 }
 
-export function MfaVerificationForm({ context, methods }: MfaProps) {
-  const [selected, setSelected] = useState<Factor>(methods.includes("passkey") ? "passkey" : methods[0] || "totp");
+export function MfaVerificationForm({ context, methods: availableMethods }: MfaProps) {
+  const methods = availableMethods.filter(method => factorSchema.safeParse(method).success);
+  const [selected, setSelected] = useState<Factor>(methods[0] || "totp");
   const method = methods.includes(selected) ? selected : methods[0] || "totp";
   const action = useMfaAction();
   const form = useForm<{ code: string }>({
@@ -103,18 +104,19 @@ export function MfaVerificationForm({ context, methods }: MfaProps) {
     action.run(() => verifyFactor({ method, code: input.code }, context));
   }
   function verifyKey() {
+    if (method !== "u2f") return;
     action.run(async () => {
       const challenge = await beginFactor({ method }, context);
       if (!challenge.ok) return challenge;
       if (!challenge.options) return { ok: false, message: "身份服务未返回设备验证请求，请重新开始。" };
       let credential;
-      try { credential = await authenticate(challenge.options); }
+      try { credential = await authenticate(challenge.options, method); }
       catch (cause) { return { ok: false, message: cause instanceof Error ? cause.message : "设备验证未能完成，请重试。" }; }
       return finishWebAuthnFactor(credential, context);
     });
   }
   function switchLabel(type: Factor) {
-    return type === "totp" ? "使用两步验证码" : type === "passkey" ? "使用 Passkey 验证"
+    return type === "totp" ? "使用两步验证码"
       : `使用${({ u2f: "安全密钥", otpEmail: "邮箱验证码", otpSms: "短信验证码" })[type]}`;
   }
 
@@ -132,9 +134,9 @@ export function MfaVerificationForm({ context, methods }: MfaProps) {
           onClick={() => action.run(() => beginFactor({ method }, context))}>发送验证码</button>}
       </fieldset>
     </form> : <>
-      <p className="body-copy">使用已绑定的安全密钥或设备进行验证。</p>
+      <p className="body-copy">使用已绑定的安全密钥进行验证。</p>
       <button className="button primary-button" type="button" disabled={action.pending} onClick={verifyKey}>
-        <Fingerprint size={20} />{method === "passkey" ? "验证 Passkey" : "验证安全密钥"}
+        <Key size={20} />验证安全密钥
       </button>
     </>}
     {methods.length > 1 && <div className="auth-method-switch" aria-label="其他验证方式">
@@ -144,7 +146,8 @@ export function MfaVerificationForm({ context, methods }: MfaProps) {
   </>;
 }
 
-export function MfaEnrollmentForm({ context, methods }: MfaProps) {
+export function MfaEnrollmentForm({ context, methods: availableMethods }: MfaProps) {
+  const methods = availableMethods.filter(method => factorSchema.safeParse(method).success);
   const [selected, setSelected] = useState<Factor>(methods.includes("totp") ? "totp" : methods[0] || "totp");
   const method = methods.includes(selected) ? selected : methods[0] || "totp";
   const [setup, setSetup] = useState<{ uri: string; secret: string } | null>(null);
@@ -171,7 +174,7 @@ export function MfaEnrollmentForm({ context, methods }: MfaProps) {
     });
   }
   function enrollKey(input: { name: string }) {
-    if (method !== "passkey" && method !== "u2f") return;
+    if (method !== "u2f") return;
     action.run(async () => {
       if (!keyOptions) {
         const result = await startKeyEnrollment({ method }, context);
@@ -183,7 +186,7 @@ export function MfaEnrollmentForm({ context, methods }: MfaProps) {
       const challenge = keyOptions;
       setKeyOptions(undefined);
       let credential;
-      try { credential = await registerCredential(challenge); }
+      try { credential = await registerCredential(challenge, method); }
       catch (cause) { return { ok: false, message: cause instanceof Error ? cause.message : "设备绑定未能完成，请重试。" }; }
       // Binding is not a session proof. The action redirects back to /verify.
       return finishKeyEnrollment({ method, name: input.name, credential }, context);
@@ -241,13 +244,13 @@ export function MfaEnrollmentForm({ context, methods }: MfaProps) {
         </form>
       </>}
     </>}
-    {(method === "passkey" || method === "u2f") && <>
+    {method === "u2f" && <>
       <p className="field-hint">绑定{factorLabels[method]}后，还需使用它完成本次登录验证。</p>
       <form method="post" className="form" noValidate onSubmit={key.handleSubmit(enrollKey)}>
         <fieldset disabled={action.pending} className="form-fieldset">
           <Field label="设备名称" registration={key.register("name")} error={key.formState.errors.name?.message}
-            autoComplete="off" placeholder={method === "passkey" ? "例如：我的手机" : "例如：随身安全密钥"} maxLength={100} />
-          <Submit pending={action.pending}><Fingerprint size={20} aria-hidden="true" />{keyOptions ? "绑定设备并继续验证" : "准备绑定设备"}</Submit>
+            autoComplete="off" placeholder="例如：随身安全密钥" maxLength={100} />
+          <Submit pending={action.pending}><Key size={20} aria-hidden="true" />{keyOptions ? "绑定设备并继续验证" : "准备绑定设备"}</Submit>
         </fieldset>
       </form>
     </>}

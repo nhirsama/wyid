@@ -18,7 +18,7 @@ import { readPasskeyAccount, writePasskeyAccount } from "./passkey-account";
 
 const contextSchema = z.object({ authRequestId: z.string().min(1).max(1024).optional(), userId: z.string().min(1).max(1024).optional(), loginHint: z.string().trim().max(320).optional() });
 function context(raw: AuthContext) { return contextSchema.parse(raw); }
-const keyMethodSchema = z.enum(["passkey", "u2f"]);
+const keyMethodSchema = z.literal("u2f");
 const otpMethodSchema = z.enum(["otpEmail", "otpSms"]);
 
 function redirectFromAction(path: string): never {
@@ -215,7 +215,7 @@ export async function beginFactor(raw: unknown, rawContext: AuthContext): Promis
     const result = await zitadel.challenge(pending, method);
     await saveUpdated(pending, result, { challengeMethod: method });
     const options = result.challenges?.webAuthN?.publicKeyCredentialRequestOptions as Record<string, unknown> | undefined;
-    if ((method === "passkey" || method === "u2f") && !options) throw new AuthError("ZITADEL 未返回设备验证请求，请重新开始。");
+    if (method === "u2f" && !options) throw new AuthError("ZITADEL 未返回安全密钥验证请求，请重新开始。");
     return { ok: true, options, message: method === "otpSms" ? "短信验证码已发送。" : method === "otpEmail" ? "邮件验证码已发送。" : undefined };
   } catch (error) { return actionError(error); }
 }
@@ -226,10 +226,6 @@ export async function finishWebAuthnFactor(raw: unknown, rawContext: AuthContext
     const method = keyMethodSchema.parse(pending.challengeMethod);
     await factorState(pending, method, false);
     const updated = await saveUpdated(pending, await zitadel.verifyWebAuthn(pending, assertion as JsonObject), { challengeMethod: undefined });
-    if (method === "passkey") {
-      const native = await zitadel.session(updated);
-      if (!native.factors?.webAuthN?.userVerified) throw new AuthError("此验证方式需要完成设备上的用户验证。");
-    }
     return await finishOrFactor(updated);
   } catch (error) { return actionError(error); }
 }
@@ -260,7 +256,7 @@ export async function startKeyEnrollment(raw: unknown, rawContext: AuthContext):
     const { method } = z.object({ method: keyMethodSchema }).parse(raw);
     const pending = await pendingFor(context(rawContext));
     const state = await factorState(pending, method, true);
-    const result = await zitadel.startKeyEnrollment(state.userId, method);
+    const result = await zitadel.startKeyEnrollment(state.userId);
     await writePendingSession({ ...pending, userId: state.userId, keyEnrollment: { method, id: result.id, expiresAt: Date.now() + 300_000 } });
     return { ok: true, options: result.options };
   } catch (error) { return actionError(error); }
@@ -271,8 +267,8 @@ export async function finishKeyEnrollment(raw: unknown, rawContext: AuthContext)
     const pending = await pendingFor(context(rawContext));
     const state = await factorState(pending, input.method, true);
     const enrollment = pending.keyEnrollment;
-    if (!enrollment || enrollment.method !== input.method || enrollment.expiresAt < Date.now()) throw new AuthError("设备绑定请求已过期，请重新开始。");
-    await zitadel.finishKeyEnrollment(state.userId, input.method, enrollment.id, input.credential as JsonObject, input.name);
+    if (!enrollment || enrollment.method !== input.method || enrollment.expiresAt < Date.now()) throw new AuthError("安全密钥绑定请求已过期，请重新开始。");
+    await zitadel.finishKeyEnrollment(state.userId, enrollment.id, input.credential as JsonObject, input.name);
     const updated = { ...pending, keyEnrollment: undefined };
     await writePendingSession(updated);
     // Binding a credential does not authenticate the session. A new assertion follows.

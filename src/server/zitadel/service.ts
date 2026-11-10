@@ -117,8 +117,6 @@ export const zitadel = {
     if (value.secondFactors.includes(SecondFactorType.OTP_EMAIL)) factors.push("otpEmail");
     if (value.secondFactors.includes(SecondFactorType.OTP_SMS)) factors.push("otpSms");
     if (value.secondFactors.includes(SecondFactorType.U2F)) factors.push("u2f");
-    // Passwordless primary login and a user-verified MFA key are independent policies.
-    if (value.multiFactors.includes(MultiFactorType.U2F_WITH_VERIFICATION)) factors.push("passkey");
     return {
       password: value.allowUsernamePassword, registration: value.allowRegister,
       passwordReset: value.allowUsernamePassword && !value.hidePasswordReset, passkey: value.passkeysType === PasskeysType.ALLOWED,
@@ -155,12 +153,9 @@ export const zitadel = {
     return user.details?.resourceOwner || getConfig().organizationId;
   },
   async methods(userId: string): Promise<Factor[]> {
-    const user = getClients().user;
-    // In proto 1.3.1 AuthFactor has no passkey case; passkeys have their own list.
-    const [authentication, passkeys] = await Promise.all([
-      user.listAuthenticationFactors({ userId, states: [AuthFactorState.READY] }),
-      user.listPasskeys({ userId }),
-    ]);
+    // Only enrolled second factors can create two-step verification entries.
+    // A passkey registration is not a U2F security-key registration.
+    const authentication = await getClients().user.listAuthenticationFactors({ userId, states: [AuthFactorState.READY] });
     const factors = new Set<Factor>();
     for (const factor of authentication.result) {
       if (factor.state !== AuthFactorState.READY) continue;
@@ -171,7 +166,6 @@ export const zitadel = {
         case "u2f": factors.add("u2f"); break;
       }
     }
-    if (passkeys.result.some(passkey => passkey.state === AuthFactorState.READY)) factors.add("passkey");
     return [...factors];
   },
   async callback(authRequestId: string, session: SessionRef) {
@@ -219,11 +213,12 @@ export const zitadel = {
   async challenge(session: SessionRef, method: Exclude<Factor, "totp">) {
     const challenges: ChallengeInput = method === "otpEmail" ? { otpEmail: { deliveryType: { case: "sendCode", value: {} } } }
       : method === "otpSms" ? { otpSms: { returnCode: false } }
-      : { webAuthN: { domain: new URL(getConfig().appUrl).hostname, userVerificationRequirement: method === "passkey" ? UserVerificationRequirement.REQUIRED : UserVerificationRequirement.DISCOURAGED } };
+      // DISCOURAGED selects ZITADEL's U2F credentials, not its passkey store.
+      : { webAuthN: { domain: new URL(getConfig().appUrl).hostname, userVerificationRequirement: UserVerificationRequirement.DISCOURAGED } };
     return this.updateSession(session, undefined, challenges);
   },
   async verifyFactor(session: SessionRef, method: Factor, code: string) {
-    if (method === "passkey" || method === "u2f") throw new AuthError("请使用通行密钥或安全密钥完成验证。");
+    if (method === "u2f") throw new AuthError("请使用安全密钥完成验证。");
     const checks: CheckInput = method === "totp" ? { totp: { code } }
       : method === "otpEmail" ? { otpEmail: { code } } : { otpSms: { code } };
     return this.updateSession(session, checks);
@@ -233,39 +228,18 @@ export const zitadel = {
   },
   async enrollTotp(userId: string) { return getClients().user.registerTOTP({ userId }); },
   async confirmTotp(userId: string, code: string) { await getClients().user.verifyTOTPRegistration({ userId, code }); },
-  async startKeyEnrollment(userId: string, type: "passkey" | "u2f"): Promise<{ id: string; options: JsonObject }> {
-    const user = getClients().user;
+  async startKeyEnrollment(userId: string): Promise<{ id: string; options: JsonObject }> {
     const domain = new URL(getConfig().appUrl).hostname;
-    let enrollment: { id: string; options?: JsonObject };
-    if (type === "passkey") {
-      const { code } = await user.createPasskeyRegistrationLink({ userId, medium: { case: "returnCode", value: {} } });
-      if (!code?.id || !code.code) throw new Error("ZITADEL returned an invalid passkey registration code");
-      const result = await user.registerPasskey({ userId, domain, code: { id: code.id, code: code.code } });
-      enrollment = { id: result.passkeyId, options: result.publicKeyCredentialCreationOptions };
-    } else {
-      const result = await user.registerU2F({ userId, domain });
-      enrollment = { id: result.u2fId, options: result.publicKeyCredentialCreationOptions };
-    }
+    const result = await getClients().user.registerU2F({ userId, domain });
+    const enrollment = { id: result.u2fId, options: result.publicKeyCredentialCreationOptions };
     const publicKey = isJsonObject(enrollment.options?.publicKey) ? enrollment.options.publicKey : enrollment.options;
     if (!enrollment.id || !publicKey || typeof publicKey.challenge !== "string" || !publicKey.challenge) {
       throw new Error("ZITADEL returned an invalid key registration challenge");
     }
-    const options: JsonObject = { ...publicKey };
-    if (type === "passkey") {
-      options.authenticatorSelection = {
-        ...(isJsonObject(publicKey.authenticatorSelection) ? publicKey.authenticatorSelection : {}),
-        residentKey: "required", requireResidentKey: true,
-      };
-    }
-    return { id: enrollment.id, options };
+    return { id: enrollment.id, options: { ...publicKey } };
   },
-  async finishKeyEnrollment(userId: string, type: "passkey" | "u2f", id: string, credential: JsonObject, name: string) {
-    const user = getClients().user;
-    if (type === "passkey") {
-      await user.verifyPasskeyRegistration({ userId, passkeyId: id, publicKeyCredential: credential, passkeyName: name });
-    } else {
-      await user.verifyU2FRegistration({ userId, u2fId: id, publicKeyCredential: credential, tokenName: name });
-    }
+  async finishKeyEnrollment(userId: string, id: string, credential: JsonObject, name: string) {
+    await getClients().user.verifyU2FRegistration({ userId, u2fId: id, publicKeyCredential: credential, tokenName: name });
   },
   async enrollOtp(userId: string, type: "otpEmail" | "otpSms") {
     const user = await this.user(userId);
