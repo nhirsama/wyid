@@ -75,7 +75,7 @@ export function LoginForm({ context, policy }: Props) {
       {webauthn.error && <div className="form-feedback"><Notice kind="error">{webauthn.error}</Notice></div>}
       {webauthn.message && <div className="form-feedback"><Notice kind="success">{webauthn.message}</Notice></div>}
       {policy.passkey && !webauthn.options && <button type="button" className="button secondary-button wide" disabled={webauthn.pending || action.pending}
-        onClick={() => webauthn.begin(form.getValues("loginName"))}><Fingerprint size={20} aria-hidden="true" />准备通行密钥登录</button>}
+        onClick={() => webauthn.begin(form.getValues("loginName"))}><Fingerprint size={20} aria-hidden="true" />使用通行密钥登录</button>}
       {policy.passkey && webauthn.options && <button type="button" className="button secondary-button wide" disabled={webauthn.pending || action.pending}
         onClick={() => webauthn.authenticateNow()}><Fingerprint size={20} aria-hidden="true" />继续使用通行密钥</button>}
       {policy.identityProviders.map(provider => <button type="button" key={provider.id} className="button secondary-button wide" disabled={action.pending || webauthn.pending}

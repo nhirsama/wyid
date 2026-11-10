@@ -20,7 +20,7 @@
 | `SESSION_SECRET` | 是 | 独立随机密钥，使用 `openssl rand -base64 32` 生成。 |
 | `ZITADEL_ORGANIZATION_ID` | 否 | 默认组织 ID；Authorization Request 含组织 scope 时以 scope 为准。 |
 | `ZITADEL_SKIP_CONSENT_PROJECT_IDS` | 否 | 免授权确认的 ZITADEL Project ID，多个 ID 用逗号分隔。 |
-| `CUSTOM_REQUEST_HEADERS` | 否 | 额外请求头，格式为 `Header:Value,Header:Value`；仅在需要覆盖默认请求头时配置。 |
+| `CUSTOM_REQUEST_HEADERS` | 否 | 额外请求头，格式为 `Header:Value,Header:Value`；其中 `Host` 仅用于生成 ZITADEL 实例定位头，不直接发送，避免 HTTP/2 协议错误。 |
 
 子路径部署时，将 `BASE_PATH` 设为相应路径，并在反向代理与 ZITADEL 中配置完整登录地址，例如 `https://login.example.com/auth/login`。修改运行时环境变量后重启容器生效。
 

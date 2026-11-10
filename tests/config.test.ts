@@ -21,6 +21,13 @@ describe("server configuration", () => {
     expect(getConfig().apiUrl).toBe("https://id.example.com");
     expect(JSON.stringify(getConfig())).toContain("server-secret-token");
   });
+  it("uses instance headers without sending Host alongside HTTP/2 :authority", () => {
+    expect(zitadelRequestHeaders(getConfig())).toEqual({
+      "x-forwarded-proto": "https",
+      "x-zitadel-instance-host": "id.example.com",
+      "x-zitadel-public-host": "id.example.com",
+    });
+  });
   it("requires service configuration before running authentication operations", () => {
     vi.stubEnv("ZITADEL_SERVICE_TOKEN", "");
     expect(() => getConfig()).toThrow(ConfigurationError);
@@ -41,7 +48,6 @@ describe("server configuration", () => {
     const config = getConfig();
     expect(config.apiUrl).toBe("http://zitadel:8080");
     expect(zitadelRequestHeaders(config)).toEqual({
-      host: "id.example.com",
       "x-forwarded-proto": "https",
       "x-zitadel-instance-host": "id.example.com",
       "x-zitadel-public-host": "id.example.com",
@@ -57,9 +63,14 @@ describe("server configuration", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("APP_URL", "https://login.example.com");
     vi.stubEnv("ZITADEL_API_URL", "http://zitadel:8080");
-    vi.stubEnv("CUSTOM_REQUEST_HEADERS", "Host:id.example.com,X-Forwarded-Proto:https");
+    vi.stubEnv("CUSTOM_REQUEST_HEADERS", "Host:id.example.com,X-Forwarded-Proto:https,X-Custom:custom-value");
     const config = getConfig();
-    expect(zitadelRequestHeaders(config)).toMatchObject({ host: "id.example.com", "x-forwarded-proto": "https" });
+    expect(zitadelRequestHeaders(config)).toEqual({
+      "x-forwarded-proto": "https",
+      "x-zitadel-instance-host": "id.example.com",
+      "x-zitadel-public-host": "id.example.com",
+      "x-custom": "custom-value",
+    });
     vi.stubEnv("CUSTOM_REQUEST_HEADERS", "Authorization:Bearer bad");
     expect(() => getConfig()).toThrow("CUSTOM_REQUEST_HEADERS");
   });

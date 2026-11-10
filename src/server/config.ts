@@ -106,13 +106,16 @@ export function getConfig() {
 
 export function zitadelRequestHeaders(config: Pick<ServerConfig, "apiUrl" | "externalDomain" | "customRequestHeaders">) {
   const apiUrl = new URL(config.apiUrl);
-  const host = config.externalDomain || config.customRequestHeaders.host || apiUrl.host;
-  const protocol = config.externalDomain || config.customRequestHeaders.host ? "https" : apiUrl.protocol.slice(0, -1);
+  const { host: customHost, ...customHeaders } = config.customRequestHeaders;
+  const host = config.externalDomain || customHost || apiUrl.host;
+  const protocol = config.externalDomain || customHost ? "https" : apiUrl.protocol.slice(0, -1);
+  // The gRPC transport sets HTTP/2 :authority from apiUrl. Sending Host as well
+  // causes ZITADEL Cloud's frontend to reset the stream with PROTOCOL_ERROR.
+  // Keep Login-style Host configuration as an instance-selection hint only.
   return {
-    host,
     "x-forwarded-proto": protocol,
     "x-zitadel-instance-host": host,
     "x-zitadel-public-host": host,
-    ...config.customRequestHeaders,
+    ...customHeaders,
   };
 }
