@@ -1,11 +1,5 @@
 /* Copied from hueneko-login/src/app/globals.css, scoped to consent only. */
-@font-face {
-  font-family: "Consent Mono";
-  src: url("../../../public/fonts/jetbrains-mono-latin.woff2") format("woff2");
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-}
+/* Reuse the shared --mono font without emitting URLs outside runtime BASE_PATH. */
 
 :global(.auth-page):has(.card) {
   min-height: 100dvh;
@@ -29,7 +23,6 @@
 .card {
   --text: #374665;
   --muted: #77869e;
-  --mono: "Consent Mono", "SFMono-Regular", Consolas, monospace;
   width: 100%;
   max-width: 445px;
   border: 1px solid var(--border);
