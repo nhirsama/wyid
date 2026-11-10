@@ -114,6 +114,12 @@ h1, p { overflow-wrap: anywhere; }
 .capability-note { margin: 20px 0 0; font-size: 12px; color: #8291a8; text-align: center; }
 .verification-icon { display: grid; place-items: center; width: 62px; height: 62px; margin: 0 auto 26px; border: 1px solid #e1e9f5; border-radius: 17px; background: #f5f8fd; color: #86a2c7; }
 .field .otp-input { font-family: var(--mono); font-size: 22px; text-align: center; letter-spacing: 9px; padding: 13px 12px 13px 21px; }
+.mfa-totp-form { width: 100%; max-width: 260px; margin-inline: auto; gap: 14px; }
+.mfa-totp-form .body-copy, .mfa-totp-form .field > label { text-align: center; }
+.mfa-totp-form .form-fieldset { gap: 14px; }
+.mfa-totp-form .field { gap: 7px; }
+.mfa-totp-form .field .otp-input { height: 44px; min-height: 44px; padding: 9px 10px 9px 16px; font-size: 20px; line-height: 24px; letter-spacing: 6px; }
+.auth-method-switch.mfa-totp-switch { max-width: 260px; margin-inline: auto; margin-top: 16px; gap: 8px; }
 .error-code { margin: 4px 0 27px; color: #91a4bf; font-family: var(--mono); font-size: 11px; letter-spacing: 1px; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -195,3 +201,6 @@ h1, p { overflow-wrap: anywhere; }
   .not-found-actions a { padding-inline: 14px; }
 }
 @media (max-width: 400px) { .not-found { min-height: 430px; padding: 30px 16px; } }
+
+/* Verification method switching, copied from hueneko-login. */
+.auth-method-switch{display:flex;flex-direction:column;align-items:flex-start;gap:10px;margin-top:18px}.auth-method-switch .text-link{font-size:13px}

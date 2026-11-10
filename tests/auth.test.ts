@@ -7,9 +7,15 @@ describe("form contracts", () => {
     expect(loginSchema.parse({ loginName: "  cat  ", password: " secret " })).toEqual({ loginName: "cat", password: " secret " });
   });
   it("validates email and matching passwords", () => {
-    const input = { givenName: "小猫", familyName: "同学", email: "cat@example.com", password: "longpassword", confirmPassword: "different" };
+    const input = { username: "小猫", email: "cat@example.com", password: "longpassword", confirmPassword: "different" };
     expect(registerSchema.safeParse(input).success).toBe(false);
     expect(registerSchema.safeParse({ ...input, email: "invalid", confirmPassword: "longpassword" }).success).toBe(false);
+  });
+  it("registers with just a username instead of separate given and family names", () => {
+    const input = { username: "  小猫  ", email: "cat@example.com", password: "longpassword", confirmPassword: "longpassword" };
+    expect(registerSchema.parse(input)).toEqual({ ...input, username: "小猫" });
+    expect(registerSchema.safeParse({ ...input, username: "   " }).success).toBe(false);
+    expect(registerSchema.safeParse({ ...input, username: "x".repeat(101) }).success).toBe(false);
   });
   it("preserves leading zeroes in TOTP codes", () => {
     expect(verifyTotpSchema.parse({ code: "001234" }).code).toBe("001234");

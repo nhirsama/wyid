@@ -18,9 +18,11 @@ describe.each(["", "/auth", "/account/login-ui"])("ZITADEL callback URLs with ba
   beforeEach(() => vi.stubEnv("BASE_PATH", basePath || "/"));
 
   it("includes the base path in registration and resent verification emails", async () => {
-    await zitadel.register({ givenName: "Test", familyName: "Account", email: "test@example.com", password: "password", confirmPassword: "password" }, undefined, "V2_a&b");
+    await zitadel.register({ username: "test-account", email: "test@example.com", password: "password", confirmPassword: "password" }, undefined, "V2_a&b");
     const template = `https://login.example.com${basePath}/verify-email?authRequest=V2_a%26b&userID={{.UserID}}&code={{.Code}}&orgID={{.OrgID}}`;
     expect(mocks.addHumanUser).toHaveBeenCalledWith(expect.objectContaining({
+      username: "test-account",
+      profile: { givenName: "test-account", familyName: "test-account", nickName: "test-account", displayName: "test-account", preferredLanguage: "zh" },
       email: expect.objectContaining({ verification: { case: "sendCode", value: { urlTemplate: template } } }),
     }));
     await zitadel.sendEmailCode("user-id", "V2_a&b");

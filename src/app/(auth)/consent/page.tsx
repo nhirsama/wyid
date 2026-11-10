@@ -5,6 +5,7 @@ import { ConsentForm } from "@/components/auth/consent-form";
 import { AppLink } from "@/components/ui/app-link";
 import { Notice } from "@/components/ui/form";
 import { authContext, authLink } from "@/lib/auth";
+import { inspectAuthentication, type AuthenticationState } from "@/server/authentication";
 import { consentToken } from "@/server/consent";
 import { getConfig } from "@/server/config";
 import { readPendingSession } from "@/server/session";
@@ -15,7 +16,7 @@ export const metadata = { title: "确认授权" };
 export default async function ConsentPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const context = authContext(await searchParams);
   const pending = await readPendingSession();
-  if (!context.authRequestId || !pending || pending.authRequestId !== context.authRequestId || !pending.sessionId || !pending.sessionToken || !pending.userId || pending.methods?.length) {
+  if (!context.authRequestId || !pending || pending.authRequestId !== context.authRequestId || !pending.sessionId || !pending.sessionToken || !pending.userId) {
     return <AuthPanel title="授权会话已过期" description="请回到你正在访问的网站，重新发起登录。">
       <div className="result-stack"><Notice kind="error">无法恢复这次授权请求，请重新登录后继续。</Notice><AppLink className="button primary-button wide" href={authLink("/login", context)}>返回登录</AppLink></div>
     </AuthPanel>;
@@ -31,10 +32,16 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
   }
   if (request.prompt.includes(Prompt.NONE)) redirect(await zitadel.deny(request.id, ErrorReason.CONSENT_REQUIRED));
 
+  let state: AuthenticationState | undefined;
+  try { state = await inspectAuthentication(pending, pending.userId, pending.requireMfa); }
+  catch { /* Render the expired-request state below, never a consent form. */ }
+  if (state && state.step !== "complete") redirect(authLink("/verify", context));
+
   let view: { appName: string; appHost: string; token: string; scopes: string[]; displayName: string; email: string } | undefined;
   try {
-    const [session, user] = await Promise.all([zitadel.session(pending), zitadel.user(pending.userId)]);
-    if (session.factors?.user?.id !== pending.userId || user.type.case !== "human") throw new Error("invalid account session");
+    if (!state || state.user.type.case !== "human") throw new Error("incomplete account authentication");
+    const user = state.user;
+    if (user.type.case !== "human") throw new Error("invalid account session");
     const appHost = new URL(request.redirectUri).host;
     const registeredAppName = await zitadel.applicationName(request.clientId);
     const appName = registeredAppName || appHost;
