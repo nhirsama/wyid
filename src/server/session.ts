@@ -9,10 +9,10 @@ import { factorSchema } from "@/lib/auth";
 const pendingSchema = z.object({
   authRequestId: z.string().min(1).max(1024).optional(), sessionId: z.string().max(1024), sessionToken: z.string().max(2048),
   methods: z.array(factorSchema).optional(), userId: z.string().max(1024).optional(), needsEnrollment: z.boolean().optional(),
-  mfaStartedAt: z.number().finite().nonnegative().optional(), requireMfa: z.boolean().optional(), passkeyPending: z.boolean().optional(), challengeMethod: factorSchema.optional(), totpEnrollmentStarted: z.boolean().optional(),
+  mfaStartedAt: z.number().finite().nonnegative().optional(), passkeyPending: z.boolean().optional(), challengeMethod: factorSchema.optional(), totpEnrollmentStarted: z.boolean().optional(),
   keyEnrollment: z.object({ method: z.literal("u2f"), id: z.string().min(1).max(1024), expiresAt: z.number().finite() }).optional(),
-  idpState: z.string().uuid().optional(), idpCreationAllowed: z.boolean().optional(), idpAutoCreation: z.boolean().optional(),
-  idpIntentId: z.string().max(1024).optional(), idpIntentToken: z.string().max(2048).optional(), idpNewUser: z.record(z.string(), z.unknown()).optional(),
+  idpState: z.string().uuid().optional(), idpId: z.string().min(1).max(1024).optional(), idpOrganizationId: z.string().max(1024).optional(),
+  idpIntentId: z.string().max(1024).optional(), idpIntentToken: z.string().max(2048).optional(),
 });
 export type PendingSession = z.infer<typeof pendingSchema>;
 const authenticatedSchema = z.object({ mfaStartedAt: z.number().finite().nonnegative().optional(), sessionId: z.string().min(1).max(1024), sessionToken: z.string().min(1).max(2048), userId: z.string().min(1).max(1024), expiresAt: z.number().finite().positive().optional() });

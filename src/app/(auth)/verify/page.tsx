@@ -14,7 +14,7 @@ export default async function VerifyPage({ searchParams }: { searchParams: Promi
   const pending = await readPendingSession();
   let state: AuthenticationState | undefined;
   if (pending && pending.authRequestId === context.authRequestId && pending.sessionId && pending.sessionToken) {
-    try { state = await inspectAuthentication(pending, pending.userId, pending.requireMfa); }
+    try { state = await inspectAuthentication(pending, pending.userId); }
     catch { /* No authentication UI or success state may rely on stale cookie metadata. */ }
   }
   const isMfaLogin = state?.step === "mfa" && !state.needsEnrollment;

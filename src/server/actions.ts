@@ -10,11 +10,13 @@ import { clearAuthenticatedSession, clearPendingSession, readAuthenticatedSessio
 import { getConfig } from "./config";
 import { zitadel, type SessionRef } from "./zitadel/service";
 import { authenticationExpiresAt, canReuseAuthentication, inspectAuthentication, requiresFreshLogin, type AuthenticationState } from "./authentication";
-import { ErrorReason, Prompt } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
+import { ErrorReason, Prompt, type AuthRequest } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
 import { redirect } from "next/navigation";
 import { consentToken, matchesConsentToken } from "./consent";
 import { runtimeBasePath, siteUrl } from "@/lib/paths";
 import { readPasskeyAccount, writePasskeyAccount } from "./passkey-account";
+import { classifyCallbackError } from "./zitadel/errors";
+import { inspectIdentityProvider } from "./identity-provider";
 
 const contextSchema = z.object({ authRequestId: z.string().min(1).max(1024).optional(), userId: z.string().min(1).max(1024).optional(), loginHint: z.string().trim().max(320).optional() });
 function context(raw: AuthContext) { return contextSchema.parse(raw); }
@@ -41,7 +43,7 @@ async function pendingFor(ctx: ReturnType<typeof context>) {
   return pending;
 }
 async function inspectPending(pending: PendingSession) {
-  return inspectAuthentication(pending, pending.userId, pending.requireMfa);
+  return inspectAuthentication(pending, pending.userId);
 }
 // Persist every rotated token before further remote reads, including reads that may fail.
 async function saveUpdated(pending: PendingSession, result: SessionRef, patch: Partial<PendingSession> = {}) {
@@ -61,30 +63,40 @@ async function rememberAuthentication(pending: PendingSession, state: Authentica
   if (expiresAt !== undefined && expiresAt <= Date.now()) return await clearAuthenticatedSession();
   await writeAuthenticatedSession({ sessionId: pending.sessionId, sessionToken: pending.sessionToken, userId: state.userId, mfaStartedAt: pending.mfaStartedAt, expiresAt });
 }
-async function callback(pending: PendingSession, state: AuthenticationState): Promise<ActionResult> {
+async function callback(pending: PendingSession, state: AuthenticationState, request: AuthRequest): Promise<ActionResult> {
   if (!pending.authRequestId) throw new AuthError("登录会话缺少授权请求。");
+  let url: string;
   try {
-    const url = await zitadel.callback(pending.authRequestId, { sessionId: pending.sessionId, sessionToken: pending.sessionToken });
-    await rememberAuthentication(pending, state);
-    await clearPendingSession();
-    return { ok: true, redirect: url };
+    url = await zitadel.callback(pending.authRequestId, { sessionId: pending.sessionId, sessionToken: pending.sessionToken });
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+    const failure = classifyCallbackError(error);
+    // These failures cannot be repaired by MFA. In particular, never consume
+    // an already handled request again, even when prompt=none was requested.
+    if (failure === "request-handled" || failure === "request-missing") throw error;
+    if (failure === "session-invalid" || failure === "organization-mismatch") {
+      if (!request.prompt.includes(Prompt.NONE)) throw error;
+      const url = await zitadel.deny(request.id, failure === "session-invalid" ? ErrorReason.LOGIN_REQUIRED : ErrorReason.ACCESS_DENIED);
+      await clearPendingSession();
+      return { ok: true, redirect: url };
+    }
     if (code !== 9) throw error;
-    const request = await zitadel.authRequest(pending.authRequestId);
+    // A policy may have changed since the first inspection. Only current
+    // native state can require another step; status 9 alone never forces MFA.
+    let latest: AuthenticationState;
+    try { latest = await inspectPending(pending); }
+    catch { throw error; }
+    if (latest.step === "complete") throw error;
     if (request.prompt.includes(Prompt.NONE)) {
       const url = await zitadel.deny(request.id, ErrorReason.INTERACTION_REQUIRED);
       await clearPendingSession();
       return { ok: true, redirect: url };
     }
-    // An application may impose stricter authentication than the instance policy.
-    // This flag only adds a requirement; it is never evidence of completion.
-    const stricter = { ...pending, requireMfa: true };
-    await writePendingSession(stricter);
-    const state = await inspectPending(stricter);
-    if (state.step === "complete") throw new AuthError("当前应用仍要求额外身份验证，请重新登录或联系账号管理员。");
-    return await deferAuthentication(stricter, state);
+    return await deferAuthentication(pending, latest);
   }
+  await rememberAuthentication(pending, state);
+  await clearPendingSession();
+  return { ok: true, redirect: url };
 }
 async function finish(pending: PendingSession, state: AuthenticationState): Promise<ActionResult> {
   if (state.step !== "complete") return await deferAuthentication(pending, state);
@@ -104,7 +116,7 @@ async function finish(pending: PendingSession, state: AuthenticationState): Prom
     await writePendingSession({ ...pending, authRequestId: request.id, methods: [], userId: state.userId, needsEnrollment: false });
     return { ok: true, redirect: authLink("/consent", { authRequestId: request.id }) };
   }
-  return await callback(pending, state);
+  return await callback(pending, state, request);
 }
 async function finishOrFactor(pending: PendingSession): Promise<ActionResult> {
   pending = { ...pending, mfaStartedAt: pending.mfaStartedAt ?? Date.now() };
@@ -125,7 +137,7 @@ export async function decideConsent(raw: unknown): Promise<ActionResult> {
     }
     const state = await inspectPending(pending);
     if (state.step !== "complete") return await deferAuthentication(pending, state);
-    return await callback(pending, state);
+    return await callback(pending, state, request);
   } catch (error) { return actionError(error); }
 }
 type PrimaryLoginInput = { loginName: string; password: string; passkey?: false } | { passkey: true; loginName?: string; userId?: string; chooseAccount?: boolean };
@@ -462,14 +474,14 @@ export async function resendEmail(rawContext: AuthContext): Promise<ActionResult
 export async function chooseIdentityProvider(raw: unknown, rawContext: AuthContext): Promise<ActionResult> {
   try {
     const { id } = z.object({ id: z.string().min(1).max(1024) }).parse(raw); const ctx = context(rawContext);
-    const policy = await zitadel.policy(await zitadel.organizationForAuth(ctx.authRequestId));
+    const organizationId = await zitadel.organizationForAuth(ctx.authRequestId);
+    const policy = await zitadel.policy(organizationId);
     if (!policy.identityProviders.some(item => item.id === id)) throw new AuthError("此登录方式当前不可用。");
     const state = crypto.randomUUID();
-    const provider = policy.identityProviders.find(item => item.id === id)!;
     await clearAuthenticatedSession();
     await clearPendingSession();
     const response = await zitadel.startIdp(id, state);
-    await writePendingSession({ authRequestId: ctx.authRequestId, sessionId: "", sessionToken: "", methods: [], userId: "", idpState: state, idpCreationAllowed: provider.creationAllowed, idpAutoCreation: provider.autoCreation });
+    await writePendingSession({ authRequestId: ctx.authRequestId, sessionId: "", sessionToken: "", methods: [], userId: "", idpState: state, idpId: id, idpOrganizationId: organizationId || "" });
     const next = response.nextStep;
     if (next.case === "authUrl") return { ok: true, redirect: next.value };
     if (next.case === "formData") return { ok: true, form: { action: new URL(next.value.url).toString(), fields: next.value.fields } };
@@ -493,11 +505,11 @@ export async function completeIdentityProvider(raw: unknown): Promise<ActionResu
     const input = z.object({ idpIntentId: z.string().min(1).max(1024), idpIntentToken: z.string().min(1).max(4096), state: z.string().uuid() }).parse(raw);
     const pending = await readPendingSession();
     if (!pending?.idpState || pending.idpState !== input.state) throw new AuthError("身份提供方登录状态无效，请重新开始。");
-    const result = await zitadel.retrieveIdp(input.idpIntentId, input.idpIntentToken);
+    const { provider, result } = await inspectIdentityProvider(pending, input);
     let userId = result.userId;
-    if (!userId && result.addHumanUser && pending.idpCreationAllowed && pending.idpAutoCreation) userId = (await zitadel.registerIdpUser(result.addHumanUser)).userId;
-    if (!userId && result.addHumanUser && pending.idpCreationAllowed) {
-      await writePendingSession({ ...pending, idpIntentId: input.idpIntentId, idpIntentToken: input.idpIntentToken, idpNewUser: result.addHumanUser });
+    if (!userId && result.addHumanUser && provider.creationAllowed && provider.autoCreation) userId = (await zitadel.registerIdpUser(result.addHumanUser)).userId;
+    else if (!userId && result.addHumanUser && provider.creationAllowed) {
+      await writePendingSession({ ...pending, idpIntentId: input.idpIntentId, idpIntentToken: input.idpIntentToken });
       return { ok: true, redirect: `/idp/confirm?state=${encodeURIComponent(input.state)}` };
     }
     if (!userId) throw new AuthError("此身份提供方尚未关联账号，且当前组织不允许自动创建账号。");
@@ -510,11 +522,17 @@ export async function confirmIdentityProviderRegistration(raw: unknown): Promise
   try {
     const { state } = z.object({ state: z.string().uuid() }).parse(raw);
     const pending = await readPendingSession();
-    if (!pending || pending.idpState !== state || !pending.idpCreationAllowed || !pending.idpIntentId || !pending.idpIntentToken || !pending.idpNewUser) throw new AuthError("身份提供方注册请求已过期，请重新开始。");
-    const user = await zitadel.registerIdpUser(pending.idpNewUser as never);
-    if (!user.userId) throw new AuthError("创建账号失败，请重新检查身份提供方返回资料。");
+    if (!pending || pending.idpState !== state || !pending.idpIntentId || !pending.idpIntentToken) throw new AuthError("身份提供方注册请求已过期，请重新开始。");
+    const { provider, result } = await inspectIdentityProvider(pending, { idpIntentId: pending.idpIntentId, idpIntentToken: pending.idpIntentToken });
+    let userId = result.userId;
+    if (!userId) {
+      if (!provider.creationAllowed) throw new AuthError("此身份提供方当前不允许创建账号，请重新选择登录方式。");
+      if (!result.addHumanUser) throw new AuthError("身份提供方注册资料已失效，请重新开始。");
+      userId = (await zitadel.registerIdpUser(result.addHumanUser)).userId;
+      if (!userId) throw new AuthError("创建账号失败，请重新检查身份提供方返回资料。");
+    }
     const mfaStartedAt = Date.now();
-    const session = await zitadel.createSession({ user: { search: { case: "userId", value: user.userId } }, idpIntent: { idpIntentId: pending.idpIntentId, idpIntentToken: pending.idpIntentToken } });
+    const session = await zitadel.createSession({ user: { search: { case: "userId", value: userId } }, idpIntent: { idpIntentId: pending.idpIntentId, idpIntentToken: pending.idpIntentToken } });
     return await finishOrFactor({ ...session, authRequestId: pending.authRequestId, mfaStartedAt });
   } catch (error) { return actionError(error); }
 }

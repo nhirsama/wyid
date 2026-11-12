@@ -34,7 +34,7 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
   if (request.prompt.includes(Prompt.NONE)) redirect(await zitadel.deny(request.id, ErrorReason.CONSENT_REQUIRED));
 
   let state: AuthenticationState | undefined;
-  try { state = await inspectAuthentication(pending, pending.userId, pending.requireMfa); }
+  try { state = await inspectAuthentication(pending, pending.userId); }
   catch { /* Render the expired-request state below, never a consent form. */ }
   if (state && state.step !== "complete") redirect(authLink("/verify", context));
 

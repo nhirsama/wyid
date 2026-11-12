@@ -57,7 +57,7 @@ describe("verification route trusts the live gate instead of cookie method flags
     mocks.inspect.mockResolvedValue(state(step, { needsEnrollment }));
     const html = renderToStaticMarkup(await VerifyPage({ searchParams }));
     expect(html).toContain(expected);
-    expect(mocks.inspect).toHaveBeenCalledWith(pending, "user-id", undefined);
+    expect(mocks.inspect).toHaveBeenCalledWith(pending, "user-id");
     expect(mocks.write).not.toHaveBeenCalled();
   });
   it("does not complete or consume a login on GET even if authentication is complete", async () => {

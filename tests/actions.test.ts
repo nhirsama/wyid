@@ -1,4 +1,6 @@
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
+import { ErrorDetailSchema } from "@zitadel/proto/zitadel/message_pb.js";
 import { AuthRequestSchema, ErrorReason, Prompt } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
 import { UserVerificationRequirement } from "@zitadel/proto/zitadel/session/v2/challenge_pb.js";
 import { FactorsSchema, SessionSchema } from "@zitadel/proto/zitadel/session/v2/session_pb.js";
@@ -49,6 +51,12 @@ const context = { authRequestId: "V2_test" };
 const policy: LoginPolicy = { password: true, registration: true, passwordReset: true, passkey: true, forceMfa: false, forceMfaLocalOnly: false, factors: ["totp"], userVerifiedKey: false, passwordPolicy: { minLength: 8, uppercase: false, lowercase: true, number: false, symbol: false }, identityProviders: [] };
 const authorization = create(AuthRequestSchema, { id: "V2_test", clientId: "client-id", redirectUri: "https://app.example.com/callback", scope: ["openid", "profile"], prompt: [] });
 const assertion = { id: "credential-id", type: "public-key", response: { clientDataJSON: "client-data", signature: "signature" } };
+const idp = { id: "idp", name: "Example IDP", creationAllowed: true, autoCreation: false };
+const idpBinding = { idpId: "idp", idpOrganizationId: "org-id" };
+const idpInformation = { idpId: "idp" };
+function callbackError(id: string, code = Code.FailedPrecondition) {
+  return new ConnectError("translated upstream message", code, undefined, [{ desc: ErrorDetailSchema, value: { id } }]);
+}
 
 function verifiedAt(offsetMs = 0) {
   const milliseconds = Date.now() + offsetMs;
@@ -103,7 +111,7 @@ beforeEach(() => {
   mocks.createSession.mockResolvedValue({ sessionId: "session-id", sessionToken: "session-token" });
   mocks.callback.mockResolvedValue("https://app.example.com/callback?code=opaque");
   mocks.startIdp.mockResolvedValue({ nextStep: { case: "authUrl", value: "https://provider.example.com/authorize" } });
-  mocks.retrieveIdp.mockResolvedValue({ userId: "", addHumanUser: { profile: { displayName: "New Account" } } });
+  mocks.retrieveIdp.mockResolvedValue({ userId: "", idpInformation, addHumanUser: { profile: { displayName: "New Account" } } });
   mocks.registerIdpUser.mockResolvedValue({ userId: "new-user" });
   mocks.session.mockResolvedValue(nativeSession());
   mocks.user.mockResolvedValue(nativeUser());
@@ -247,7 +255,10 @@ describe("reuse of live ZITADEL login sessions", () => {
     if (reason === "no session") mocks.readAuthenticatedSession.mockResolvedValue(null);
     if (reason === "consent needed") mocks.canSkipConsent.mockResolvedValue(false);
     if (reason === "MFA needed") mocks.methods.mockResolvedValue(["totp"]);
-    if (reason === "application step-up") mocks.callback.mockRejectedValue({ code: 9 });
+    if (reason === "application step-up") mocks.callback.mockImplementation(async () => {
+      mocks.policy.mockResolvedValue({ ...policy, forceMfa: true });
+      throw { code: 9 };
+    });
     expect(await resumeLogin(context)).toEqual({ ok: true, redirect: "https://app.example.com/callback?error=required" });
     expect(mocks.deny).toHaveBeenCalledWith("V2_test", expected);
     expect(mocks.writePendingSession).not.toHaveBeenCalled();
@@ -279,9 +290,9 @@ describe("reuse of live ZITADEL login sessions", () => {
   it.each(["callback", "registration confirmation"])("starts the IDP flow before the native check with a zero external-login lifetime during %s", async entry => {
     const state = "a137fc65-3e87-4da0-b5cd-936eb5972868";
     const boundary = Date.now();
-    mockPendingSession(pendingSession({ authRequestId: undefined, idpState: state, idpCreationAllowed: true, idpIntentId: "intent-id", idpIntentToken: "intent-token", idpNewUser: { username: "new-user" } }));
-    mocks.policy.mockResolvedValue({ ...policy, externalLoginLifetimeMs: 0 });
-    mocks.retrieveIdp.mockResolvedValue({ userId: "user-id" });
+    mockPendingSession(pendingSession({ ...idpBinding, authRequestId: undefined, idpState: state, idpIntentId: "intent-id", idpIntentToken: "intent-token" }));
+    mocks.policy.mockResolvedValue({ ...policy, identityProviders: [idp], externalLoginLifetimeMs: 0 });
+    mocks.retrieveIdp.mockResolvedValue({ userId: "user-id", idpInformation });
     mocks.registerIdpUser.mockResolvedValue({ userId: "user-id" });
     mocks.createSession.mockImplementation(async () => {
       vi.advanceTimersByTime(250);
@@ -391,11 +402,15 @@ describe("ZITADEL server actions", () => {
     expect(mocks.writePendingSession).toHaveBeenCalledWith(expect.objectContaining({ methods: ["totp"], userId: "user-id" }));
     expect(mocks.callback).not.toHaveBeenCalled();
   });
-  it("retains a session only when ZITADEL explicitly requests another factor", async () => {
-    mocks.callback.mockRejectedValueOnce({ code: 9 });
+  it("continues authentication only when a fresh native policy inspection requires it", async () => {
+    mocks.callback.mockImplementationOnce(async () => {
+      mocks.policy.mockResolvedValue({ ...policy, forceMfa: true });
+      throw { code: 9 };
+    });
     const result = await login(credentials, context);
     expect(result).toEqual({ ok: true, redirect: "/verify?authRequest=V2_test" });
-    expect(mocks.writePendingSession).toHaveBeenCalledWith(expect.objectContaining({ authRequestId: "V2_test", sessionId: "session-id", sessionToken: "session-token", methods: ["totp"], userId: "user-id", requireMfa: true, needsEnrollment: true }));
+    expect(mocks.writePendingSession).toHaveBeenCalledWith(expect.objectContaining({ authRequestId: "V2_test", sessionId: "session-id", sessionToken: "session-token", methods: ["totp"], userId: "user-id", needsEnrollment: true }));
+    expect(mocks.writePendingSession.mock.calls.every(([pending]) => !pending.requireMfa)).toBe(true);
   });
   it("binds an MFA verification to the encrypted session and rotates the Session Token", async () => {
     mocks.readPendingSession.mockResolvedValue({ authRequestId: "V2_test", sessionId: "session-id", sessionToken: "old-token", methods: ["totp"], userId: "user-id" });
@@ -454,20 +469,25 @@ describe("ZITADEL server actions", () => {
     const result = await chooseIdentityProvider({ id: "idp" }, context);
     expect(result).toEqual({ ok: true, redirect: "https://provider.example.com/authorize" });
     expect(mocks.startIdp).toHaveBeenCalledWith("idp", expect.any(String));
-    expect(mocks.writePendingSession).toHaveBeenCalledWith(expect.objectContaining({ idpCreationAllowed: true, idpAutoCreation: false }));
+    expect(mocks.writePendingSession).toHaveBeenCalledWith(expect.objectContaining(idpBinding));
+    const pending = mocks.writePendingSession.mock.calls[0][0];
+    expect(pending).not.toHaveProperty("idpCreationAllowed");
+    expect(pending).not.toHaveProperty("idpAutoCreation");
   });
   it("requires explicit account creation confirmation when an IDP does not auto-create accounts", async () => {
     const state = "00000000-0000-4000-8000-000000000000";
-    mocks.readPendingSession.mockResolvedValue({ authRequestId: "V2_test", sessionId: "", sessionToken: "", methods: [], userId: "", idpState: state, idpCreationAllowed: true, idpAutoCreation: false });
+    mocks.policy.mockResolvedValue({ ...policy, identityProviders: [idp] });
+    mockPendingSession(pendingSession({ ...idpBinding, sessionId: "", sessionToken: "", idpState: state }));
     const result = await completeIdentityProvider({ idpIntentId: "intent-id", idpIntentToken: "intent-token", state });
     expect(result).toEqual({ ok: true, redirect: `/idp/confirm?state=${state}` });
-    expect(mocks.writePendingSession).toHaveBeenCalledWith(expect.objectContaining({ idpIntentId: "intent-id", idpIntentToken: "intent-token", idpNewUser: expect.any(Object) }));
-    mocks.readPendingSession.mockResolvedValue({ authRequestId: "V2_test", sessionId: "", sessionToken: "", methods: [], userId: "", idpState: state, idpCreationAllowed: true, idpIntentId: "intent-id", idpIntentToken: "intent-token", idpNewUser: { profile: { displayName: "New Account" } } });
+    expect(mocks.writePendingSession).toHaveBeenCalledWith(expect.objectContaining({ ...idpBinding, idpIntentId: "intent-id", idpIntentToken: "intent-token" }));
+    expect(mocks.writePendingSession.mock.calls[0][0]).not.toHaveProperty("idpNewUser");
     mocks.session.mockResolvedValue(nativeSession({ password: undefined, intent: { verifiedAt: verifiedAt() } }, "new-user"));
     mocks.user.mockResolvedValue(nativeUser({}, "new-user"));
     const confirmed = await confirmIdentityProviderRegistration({ state });
     expect(confirmed.ok).toBe(true);
     expect(mocks.registerIdpUser).toHaveBeenCalledWith({ profile: { displayName: "New Account" } });
+    expect(mocks.retrieveIdp).toHaveBeenCalledTimes(2);
     expect(mocks.createSession).toHaveBeenCalledWith({ user: { search: { case: "userId", value: "new-user" } }, idpIntent: { idpIntentId: "intent-id", idpIntentToken: "intent-token" } });
   });
   it("verifies email only with an explicit code and user identifier", async () => {
@@ -475,6 +495,207 @@ describe("ZITADEL server actions", () => {
     expect(mocks.verifyEmail).not.toHaveBeenCalled();
     mocks.verifyEmail.mockResolvedValue(undefined);
     expect((await verifyEmail({ code: "123456" }, { userId: "user-id" })).ok).toBe(true);
+  });
+});
+
+describe("OIDC callback failure classification", () => {
+  it.each([
+    ["COMMAND-Sx208nt", Code.FailedPrecondition, "此授权请求已处理"],
+    ["COMMAND-Sx202nt", Code.FailedPrecondition, "此授权请求已处理"],
+    ["COMMAND-SFwd2", Code.FailedPrecondition, "此授权请求已处理"],
+    ["COMMAND-jae5P", Code.NotFound, "授权请求已失效"],
+    ["COMMAND-59ljd", Code.FailedPrecondition, "当前账号不属于"],
+    ["COMMAND-Hewfq", Code.FailedPrecondition, "登录会话已失效"],
+    ["COMMAND-Hkl3d", Code.FailedPrecondition, "登录会话已失效"],
+    ["COMMAND-Flk38", Code.FailedPrecondition, "登录会话已失效"],
+  ] as const)("does not turn %s into MFA or retry a consumed authorization", async (id, code, message) => {
+    mocks.callback.mockRejectedValue(callbackError(id, code));
+    const result = await login(credentials, context);
+    expect(result).toMatchObject({ ok: false, message: expect.stringContaining(message), requestId: expect.any(String) });
+    expect(mocks.callback).toHaveBeenCalledTimes(1);
+    expect(mocks.session).toHaveBeenCalledTimes(1);
+    expect(mocks.deny).not.toHaveBeenCalled();
+    expect(mocks.writeAuthenticatedSession).not.toHaveBeenCalled();
+    expect(mocks.writePendingSession.mock.calls.every(([pending]) => !pending.requireMfa && !pending.needsEnrollment)).toBe(true);
+  });
+
+  it.each([
+    { code: 9 },
+    new ConnectError("Errors.User.MFA.NotReady (COMMAND-Hkl3d)", Code.FailedPrecondition),
+    callbackError("unknown-error-id"),
+  ])("returns an identifiable generic failure instead of guessing MFA for unknown errors", async error => {
+    mocks.callback.mockRejectedValue(error);
+    expect(await login(credentials, context)).toMatchObject({ ok: false, message: "当前操作的前置条件未满足，请重新发起登录或联系管理员。", requestId: expect.any(String) });
+    expect(mocks.callback).toHaveBeenCalledTimes(1);
+    expect(mocks.deny).not.toHaveBeenCalled();
+    expect(mocks.writeAuthenticatedSession).not.toHaveBeenCalled();
+    expect(mocks.writePendingSession.mock.calls.every(([pending]) => !pending.requireMfa && !pending.needsEnrollment)).toBe(true);
+  });
+
+  it("retains the callback error if the live reinspection is unavailable", async () => {
+    mocks.callback.mockRejectedValue({ code: 9 });
+    mocks.session.mockResolvedValueOnce(nativeSession()).mockRejectedValueOnce({ code: 14 });
+    expect(await login(credentials, context)).toMatchObject({ ok: false, message: expect.stringContaining("前置条件"), requestId: expect.any(String) });
+    expect(mocks.writeAuthenticatedSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["COMMAND-Hkl3d", ErrorReason.LOGIN_REQUIRED],
+    ["COMMAND-59ljd", ErrorReason.ACCESS_DENIED],
+  ] as const)("returns a precise protocol error for %s with prompt=none", async (id, reason) => {
+    mocks.readAuthenticatedSession.mockResolvedValue({ sessionId: "session-id", sessionToken: "token", userId: "user-id" });
+    mocks.authRequest.mockResolvedValue({ ...authorization, prompt: [Prompt.NONE] });
+    mocks.callback.mockRejectedValue(callbackError(id));
+    mocks.deny.mockResolvedValue("https://app.example.com/callback?error=required");
+    expect(await resumeLogin(context)).toEqual({ ok: true, redirect: "https://app.example.com/callback?error=required" });
+    expect(mocks.deny).toHaveBeenCalledWith("V2_test", reason);
+    expect(mocks.writePendingSession).not.toHaveBeenCalled();
+  });
+
+  it.each([callbackError("COMMAND-Sx208nt"), { code: 9 }])("does not consume an already handled or unknown request again with prompt=none", async error => {
+    mocks.readAuthenticatedSession.mockResolvedValue({ sessionId: "session-id", sessionToken: "token", userId: "user-id" });
+    mocks.authRequest.mockResolvedValue({ ...authorization, prompt: [Prompt.NONE] });
+    mocks.callback.mockRejectedValue(error);
+    expect(await resumeLogin(context)).toMatchObject({ ok: false, requestId: expect.any(String) });
+    expect(mocks.deny).not.toHaveBeenCalled();
+    expect(mocks.writePendingSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("identity-provider boundaries use live backend policy and intent data", () => {
+  const state = "00000000-0000-4000-8000-000000000000";
+  const intent = { idpIntentId: "intent-id", idpIntentToken: "intent-token" };
+  const entries = ["callback", "confirmation"] as const;
+  const enter = (entry: typeof entries[number]) => entry === "callback"
+    ? completeIdentityProvider({ ...intent, state }) : confirmIdentityProviderRegistration({ state });
+  beforeEach(() => {
+    mockPendingSession(pendingSession({ ...idpBinding, ...intent, sessionId: "", sessionToken: "", idpState: state }));
+    mocks.policy.mockResolvedValue({ ...policy, identityProviders: [idp] });
+    mocks.session.mockResolvedValue(nativeSession({ password: undefined, intent: { verifiedAt: verifiedAt() } }, "new-user"));
+    mocks.user.mockResolvedValue(nativeUser({}, "new-user"));
+  });
+
+  it.each(entries)("rejects a disabled or removed provider during %s", async entry => {
+    mocks.policy.mockResolvedValue({ ...policy, identityProviders: [] });
+    expect(await enter(entry)).toMatchObject({ ok: false, message: expect.stringContaining("登录方式当前不可用") });
+    expect(mocks.organizationForAuth).toHaveBeenCalledWith("V2_test");
+    expect(mocks.policy).toHaveBeenCalledWith("org-id");
+    expect(mocks.retrieveIdp).not.toHaveBeenCalled();
+    expect(mocks.registerIdpUser).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it.each(entries)("rejects new account creation after it is disabled during %s", async entry => {
+    mocks.policy.mockResolvedValue({ ...policy, identityProviders: [{ ...idp, creationAllowed: false, autoCreation: true }] });
+    expect((await enter(entry)).ok).toBe(false);
+    expect(mocks.retrieveIdp).toHaveBeenCalledWith("intent-id", "intent-token");
+    expect(mocks.registerIdpUser).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it.each(entries)("rejects a changed organization during %s", async entry => {
+    mocks.organizationForAuth.mockResolvedValue("other-org");
+    expect(await enter(entry)).toMatchObject({ ok: false, message: expect.stringContaining("组织已变化") });
+    expect(mocks.policy).not.toHaveBeenCalled();
+    expect(mocks.retrieveIdp).not.toHaveBeenCalled();
+    expect(mocks.registerIdpUser).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it.each(entries)("rejects an intent from a different provider during %s", async entry => {
+    mocks.retrieveIdp.mockResolvedValue({ userId: "new-user", idpInformation: { idpId: "other-idp" } });
+    expect(await enter(entry)).toMatchObject({ ok: false, message: expect.stringContaining("不匹配") });
+    expect(mocks.registerIdpUser).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it.each(entries)("rejects missing provider information from the backend during %s", async entry => {
+    mocks.retrieveIdp.mockResolvedValue({ userId: "new-user" });
+    expect((await enter(entry)).ok).toBe(false);
+    expect(mocks.registerIdpUser).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it.each(entries)("restarts legacy unbound flow cookies during %s", async entry => {
+    const legacy = { ...pendingSession({ ...intent, sessionId: "", sessionToken: "", idpState: state }), idpCreationAllowed: true, idpAutoCreation: true, idpNewUser: { username: "stale-user" } };
+    mockPendingSession(legacy);
+    expect((await enter(entry)).ok).toBe(false);
+    expect(mocks.registerIdpUser).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it.each(entries.flatMap(entry => ["organizationForAuth", "policy", "retrieveIdp"].map(operation => ({ entry, operation }))))("does not create accounts or sessions if $operation fails during $entry", async ({ entry, operation }) => {
+    mocks[operation as "organizationForAuth" | "policy" | "retrieveIdp"].mockRejectedValue({ code: 14 });
+    expect(await enter(entry)).toMatchObject({ ok: false, requestId: expect.any(String) });
+    expect(mocks.registerIdpUser).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("asks for confirmation when auto-creation is disabled after starting IDP login", async () => {
+    mocks.policy.mockResolvedValue({ ...policy, identityProviders: [{ ...idp, autoCreation: true }] });
+    await chooseIdentityProvider({ id: "idp" }, context);
+    const flowState = (await mocks.readPendingSession()).idpState;
+    mocks.policy.mockResolvedValue({ ...policy, identityProviders: [idp] });
+    expect(await completeIdentityProvider({ ...intent, state: flowState })).toEqual({ ok: true, redirect: `/idp/confirm?state=${flowState}` });
+    expect(mocks.registerIdpUser).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("uses a newly enabled auto-creation policy at callback", async () => {
+    await chooseIdentityProvider({ id: "idp" }, context);
+    const flowState = (await mocks.readPendingSession()).idpState;
+    mocks.policy.mockResolvedValue({ ...policy, identityProviders: [{ ...idp, autoCreation: true }] });
+    expect((await completeIdentityProvider({ ...intent, state: flowState })).ok).toBe(true);
+    expect(mocks.registerIdpUser).toHaveBeenCalledTimes(1);
+    expect(mocks.createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks a previously opened confirmation flow after registration is disabled", async () => {
+    expect(await enter("callback")).toEqual({ ok: true, redirect: `/idp/confirm?state=${state}` });
+    mocks.policy.mockResolvedValue({ ...policy, identityProviders: [{ ...idp, creationAllowed: false }] });
+    expect(await enter("confirmation")).toMatchObject({ ok: false, message: expect.stringContaining("不允许创建账号") });
+    expect(mocks.registerIdpUser).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("does not register from old data when the intent no longer supplies registration data", async () => {
+    expect((await enter("callback")).ok).toBe(true);
+    mocks.retrieveIdp.mockResolvedValue({ userId: "", idpInformation });
+    expect(await enter("confirmation")).toMatchObject({ ok: false, message: expect.stringContaining("注册资料已失效") });
+    expect(mocks.registerIdpUser).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("fetches fresh registration data at confirmation instead of using a cached profile", async () => {
+    const cached = { ...pendingSession({ ...idpBinding, ...intent, idpState: state }), idpNewUser: { username: "stale-profile" }, idpCreationAllowed: true };
+    mockPendingSession(cached);
+    const fresh = { username: "fresh-profile", profile: { displayName: "Updated Account" } };
+    mocks.retrieveIdp.mockResolvedValue({ userId: "", idpInformation, addHumanUser: fresh });
+    expect((await enter("confirmation")).ok).toBe(true);
+    expect(mocks.registerIdpUser).toHaveBeenCalledExactlyOnceWith(fresh);
+  });
+
+  it.each(entries)("logs into an already linked account without creating it again during %s", async entry => {
+    mocks.policy.mockResolvedValue({ ...policy, identityProviders: [{ ...idp, creationAllowed: false }] });
+    mocks.retrieveIdp.mockResolvedValue({ userId: "new-user", idpInformation });
+    expect((await enter(entry)).ok).toBe(true);
+    expect(mocks.registerIdpUser).not.toHaveBeenCalled();
+    expect(mocks.createSession).toHaveBeenCalledWith({ user: { search: { case: "userId", value: "new-user" } }, idpIntent: intent });
+  });
+
+  it("supports an instance-level flow without inventing an organization", async () => {
+    mocks.organizationForAuth.mockResolvedValue(undefined);
+    await chooseIdentityProvider({ id: "idp" }, {});
+    const pending = await mocks.readPendingSession();
+    expect(pending.idpOrganizationId).toBe("");
+    expect(await completeIdentityProvider({ ...intent, state: pending.idpState })).toEqual({ ok: true, redirect: `/idp/confirm?state=${pending.idpState}` });
+    expect(mocks.policy).toHaveBeenCalledWith(undefined);
+  });
+
+  it("rejects a changed state before reading the policy or intent", async () => {
+    expect((await completeIdentityProvider({ ...intent, state: "10000000-0000-4000-8000-000000000000" })).ok).toBe(false);
+    expect(mocks.policy).not.toHaveBeenCalled();
+    expect(mocks.retrieveIdp).not.toHaveBeenCalled();
   });
 });
 
@@ -582,10 +803,10 @@ describe("unified authentication gate", () => {
 
   it.each([false, true])("requires already enrolled MFA after an external intent; forceMfaLocalOnly=%s", async localOnly => {
     const state = "00000000-0000-4000-8000-000000000000";
-    mockPendingSession(pendingSession({ sessionId: "", sessionToken: "", idpState: state }));
-    mocks.retrieveIdp.mockResolvedValue({ userId: "user-id" });
+    mockPendingSession(pendingSession({ ...idpBinding, sessionId: "", sessionToken: "", idpState: state }));
+    mocks.retrieveIdp.mockResolvedValue({ userId: "user-id", idpInformation });
     mocks.session.mockResolvedValue(nativeSession({ password: undefined, intent: { verifiedAt: verifiedAt() } }));
-    mocks.policy.mockResolvedValue({ ...policy, forceMfaLocalOnly: localOnly });
+    mocks.policy.mockResolvedValue({ ...policy, identityProviders: [idp], forceMfaLocalOnly: localOnly });
     mocks.methods.mockResolvedValue(["totp"]);
     expect(await completeIdentityProvider({ idpIntentId: "intent-id", idpIntentToken: "intent-token", state })).toEqual({ ok: true, redirect: "/verify?authRequest=V2_test" });
     expectNoAuthentication();

@@ -169,6 +169,9 @@ importers:
       '@bufbuild/protobuf':
         specifier: 2.10.2
         version: 2.10.2
+      '@connectrpc/connect':
+        specifier: 2.3.0
+        version: 2.3.0(@bufbuild/protobuf@2.10.2)
       '@hookform/resolvers':
         specifier: 5.2.2
         version: 5.2.2(react-hook-form@7.71.2(react@19.2.8))

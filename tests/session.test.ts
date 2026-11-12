@@ -74,6 +74,30 @@ describe("encrypted reusable native session cookie", () => {
     expect(await readAuthenticatedSession()).toBeNull();
   });
 
+  it("stores only the IDP flow binding and intent credentials, not a policy or profile snapshot", async () => {
+    const pending = { sessionId: "", sessionToken: "", idpState: "00000000-0000-4000-8000-000000000000", idpId: "idp", idpOrganizationId: "org-id", idpIntentId: "intent", idpIntentToken: "intent-token" };
+    await writePendingSession({ ...pending, idpCreationAllowed: true, idpAutoCreation: true, idpNewUser: { username: "stale-profile" } } as typeof pending);
+    const token = mocks.set.mock.calls[0][1];
+    const { payload } = await jwtDecrypt(token, key, { issuer, audience: "wyid:pending-login" });
+    expect(payload).toMatchObject(pending);
+    for (const field of ["idpCreationAllowed", "idpAutoCreation", "idpNewUser"]) expect(payload).not.toHaveProperty(field);
+    mocks.get.mockReturnValue({ value: token });
+    expect(await readPendingSession()).toEqual(pending);
+  });
+
+  it("does not retain legacy MFA requirements inferred from a callback error", async () => {
+    await writePendingSession({ ...session, requireMfa: true } as typeof session);
+    const token = mocks.set.mock.calls[0][1];
+    const { payload } = await jwtDecrypt(token, key, { issuer, audience: "wyid:pending-login" });
+    expect(payload).not.toHaveProperty("requireMfa");
+    mocks.get.mockReturnValue({ value: token });
+    expect(await readPendingSession()).toEqual(session);
+    const legacy = await new EncryptJWT({ ...session, requireMfa: true }).setProtectedHeader({ alg: "dir", enc: "A256GCM" })
+      .setIssuer(issuer).setAudience("wyid:pending-login").setExpirationTime("10m").encrypt(key);
+    mocks.get.mockReturnValue({ value: legacy });
+    expect(await readPendingSession()).toEqual(session);
+  });
+
   it("clears the reusable cookie on logout", async () => {
     await clearAuthenticatedSession();
     expect(mocks.set).toHaveBeenCalledWith("__Host-wyid-session", "", { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 0 });
