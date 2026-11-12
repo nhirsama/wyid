@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn(), config: vi.fn() }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: mocks.get, set: mocks.set }) }));
 vi.mock("@/server/config", () => ({ getConfig: mocks.config }));
-import { clearAuthenticatedSession, readAuthenticatedSession, readPendingSession, writeAuthenticatedSession, writePendingSession } from "@/server/session";
+import { clearAccountGrant, readAccountGrant, writeAccountGrant, clearAuthenticatedSession, readAuthenticatedSession, readPendingSession, writeAuthenticatedSession, writePendingSession } from "@/server/session";
 
 const issuer = "https://login.example.com";
 const secret = "test-session-secret-that-is-at-least-32-characters";
@@ -101,5 +101,31 @@ describe("encrypted reusable native session cookie", () => {
   it("clears the reusable cookie on logout", async () => {
     await clearAuthenticatedSession();
     expect(mocks.set).toHaveBeenCalledWith("__Host-wyid-session", "", { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 0 });
+  });
+});
+
+describe("encrypted account enrollment continuation", () => {
+  it("uses a distinct audience, browser/session binding, strict cookie and absolute expiry", async () => {
+    const grant = { userId: "user-id", sessionId: "native-session", type: "passkey" as const, phase: "register" as const, id: "registration-id", createdAt: Date.now(), expiresAt: Date.now() + 600_000 };
+    await writeAccountGrant(grant);
+    const [name, token, options] = mocks.set.mock.calls[0];
+    expect(name).toBe("__Host-wyid-account-check");
+    expect(options).toMatchObject({ httpOnly: true, secure: true, sameSite: "strict", path: "/", expires: new Date(grant.expiresAt) });
+    const { payload } = await jwtDecrypt(token, key, { issuer, audience: "wyid:account-factor-check" });
+    expect(payload).toMatchObject(grant);
+    expect(payload).not.toHaveProperty("sessionToken");
+    mocks.get.mockReturnValue({ value: token });
+    expect(await readAccountGrant()).toEqual(grant);
+    expect(await readAuthenticatedSession()).toBeNull();
+    expect(await readPendingSession()).toBeNull();
+    vi.advanceTimersByTime(600_001);
+    expect(await readAccountGrant()).toBeNull();
+  });
+  it("does not accept authenticated login cookies as enrollment authority", async () => {
+    await writeAuthenticatedSession(session);
+    mocks.get.mockReturnValue({ value: mocks.set.mock.calls[0][1] });
+    expect(await readAccountGrant()).toBeNull();
+    await clearAccountGrant();
+    expect(mocks.set).toHaveBeenLastCalledWith("__Host-wyid-account-check", "", { httpOnly: true, secure: true, sameSite: "strict", path: "/", maxAge: 0 });
   });
 });

@@ -18,6 +18,37 @@ export type PendingSession = z.infer<typeof pendingSchema>;
 const authenticatedSchema = z.object({ mfaStartedAt: z.number().finite().nonnegative().optional(), sessionId: z.string().min(1).max(1024), sessionToken: z.string().min(1).max(2048), userId: z.string().min(1).max(1024), expiresAt: z.number().finite().positive().optional() });
 export type AuthenticatedSession = z.infer<typeof authenticatedSchema>;
 
+const accountGrantSchema = z.object({
+  sessionId: z.string().min(1).max(1024), userId: z.string().min(1).max(1024),
+  type: z.enum(["totp", "webauthn", "passkey", "otp-email", "otp-sms", "phone"]),
+  phase: z.enum(["register", "check"]), id: z.string().max(1024).optional(),
+  createdAt: z.number().finite().nonnegative(), expiresAt: z.number().finite().positive(),
+});
+export type AccountGrant = z.infer<typeof accountGrantSchema>;
+
+/** Narrow continuation authority, never authentication proof or a portal grant. */
+export async function writeAccountGrant(input: AccountGrant) {
+  const { key, secure, issuer } = options();
+  const payload = accountGrantSchema.parse(input);
+  const token = await new EncryptJWT(payload).setProtectedHeader({ alg: "dir", enc: "A256GCM" })
+    .setIssuer(issuer).setAudience("wyid:account-factor-check").setIssuedAt().setExpirationTime(payload.expiresAt / 1000).encrypt(key);
+  (await cookies()).set(secure ? "__Host-wyid-account-check" : "wyid-account-check", token, { httpOnly: true, secure, sameSite: "strict", path: "/", expires: new Date(payload.expiresAt) });
+}
+export async function readAccountGrant(): Promise<AccountGrant | null> {
+  const { key, secure, issuer } = options();
+  const token = (await cookies()).get(secure ? "__Host-wyid-account-check" : "wyid-account-check")?.value;
+  if (!token) return null;
+  try {
+    const { payload } = await jwtDecrypt(token, key, { issuer, audience: "wyid:account-factor-check", keyManagementAlgorithms: ["dir"], contentEncryptionAlgorithms: ["A256GCM"] });
+    const grant = accountGrantSchema.parse(payload);
+    return grant.expiresAt > Date.now() && grant.createdAt <= Date.now() ? grant : null;
+  } catch { return null; }
+}
+export async function clearAccountGrant() {
+  const { secure } = options();
+  (await cookies()).set(secure ? "__Host-wyid-account-check" : "wyid-account-check", "", { httpOnly: true, secure, sameSite: "strict", path: "/", maxAge: 0 });
+}
+
 function options() {
   const config = getConfig();
   const secure = new URL(config.appUrl).protocol === "https:";

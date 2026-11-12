@@ -4,21 +4,16 @@ import { Notice } from "@/components/ui/form";
 import { readAuthenticatedSession } from "@/server/session";
 import { inspectAuthentication, type AuthenticationState } from "@/server/authentication";
 import { logout, resumeAccountAuthentication } from "@/server/actions";
-import { getBrand } from "@/server/brand";
 
 export const metadata = { title: "账号" };
 
 export default async function AccountPage() {
   const session = await readAuthenticatedSession();
-  const brand = getBrand();
   if (!session) redirect("/login");
 
   let state: AuthenticationState;
-  let accountName: string;
   try {
     state = await inspectAuthentication(session, session.userId);
-    const user = state.user;
-    accountName = user.preferredLoginName || user.username;
   } catch {
     redirect("/login");
   }
@@ -31,10 +26,6 @@ export default async function AccountPage() {
     </div>
   </AuthPanel>;
 
-  return <AuthPanel title="已登录" description={`你已通过 ${brand.nickname} 完成身份验证。`}>
-    <div className="result-stack">
-      <Notice kind="success">当前账号：{accountName}</Notice>
-      <form action={logout}><button className="button secondary-button wide" type="submit">退出登录</button></form>
-    </div>
-  </AuthPanel>;
+  // Page redirects are prefixed by Next.js itself, including runtime basePath.
+  redirect("/account/apps");
 }

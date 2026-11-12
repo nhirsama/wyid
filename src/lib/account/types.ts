@@ -1,0 +1,24 @@
+export type ApplicationType = "spa" | "web";
+export type Application = {
+  id: string;
+  name: string;
+  website: string;
+  type: ApplicationType;
+  enabled: boolean;
+  clientId: string;
+  projectId: string;
+  redirectUris: string[];
+  postLogoutRedirectUris: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+export type ApplicationInput = Pick<Application, "name" | "website" | "type" | "redirectUris" | "postLogoutRedirectUris">;
+export type Account = { id: string; displayName: string; givenName: string; familyName: string; email: string; emailVerified: boolean; preferredLanguage: string; avatarUrl?: string };
+export type PasswordPolicy = { minLength: number; hasUppercase: boolean; hasLowercase: boolean; hasNumber: boolean; hasSymbol: boolean };
+export type PublicConfig = { configured: boolean; missing: string[]; issuer: string; loginMethods: { password: boolean; registration: boolean; passkey?: boolean }; passwordPolicy: PasswordPolicy | null };
+export type Device = { id: string; name: string; createdAt: string; lastUsedAt: string; current: boolean };
+export type FactorType = "totp" | "otp-email" | "otp-sms" | "webauthn" | "passkey";
+export type FactorAvailability = Record<FactorType, boolean>;
+export type AuthenticationMethod = { type: string; name: string; state: string; id?: string };
+export type MethodsResponse = { methods: AuthenticationMethod[]; available: FactorAvailability; phone: { number: string; verified: boolean } };
+export type ApiErrorBody = { error: { code: string; message: string; requestId?: string; fields?: Record<string, string> } };

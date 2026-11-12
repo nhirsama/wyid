@@ -18,7 +18,7 @@ export function generateMetadata(): Metadata {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const basePath = runtimeBasePath();
-  return <html lang="zh-CN">
+  return <html lang="zh-CN" data-base-path={basePath}>
     <head>
       <link rel="preconnect" href="https://cdn.jsdelivr.net" crossOrigin="anonymous" />
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/lxgwwenkai-regular.css" />

@@ -105,11 +105,9 @@ describe("account portal does not treat an old authenticated cookie as proof", (
     expect(html).not.toContain("当前账号");
     expect(mocks.write).not.toHaveBeenCalled();
   });
-  it("shows the logged-in account only after all native checks pass", async () => {
+  it("opens the complete portal only after all native checks pass", async () => {
     mocks.inspect.mockResolvedValue(state("complete"));
-    const html = renderToStaticMarkup(await AccountPage());
-    expect(html).toContain("当前账号：");
-    expect(html).toContain("test-user");
+    await expect(AccountPage()).rejects.toThrow("NEXT_REDIRECT:/account/apps");
   });
   it("returns to the existing login instead of adding a failure page when inspection fails", async () => {
     mocks.inspect.mockRejectedValueOnce(new Error("unavailable"));

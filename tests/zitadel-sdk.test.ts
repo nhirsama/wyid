@@ -48,6 +48,15 @@ afterEach(async () => {
 });
 
 describe("ZITADEL gRPC transport", () => {
+  it("uses an explicit user session token and organization without reusing the PAT singleton", async () => {
+    vi.stubEnv("ZITADEL_EXTERNALDOMAIN", "id.example.com");
+    const { getClients, getUserClients } = await import("@/server/zitadel/sdk");
+    expect(() => getUserClients("")).toThrow("Missing user session token");
+    await getUserClients("user-session-token", "user-org").user.getUserByID({ userId: "user" });
+    await getClients().user.getUserByID({ userId: "user" });
+    expect(receivedHeaders[0]).toMatchObject({ authorization: "Bearer user-session-token", "x-zitadel-orgid": "user-org" });
+    expect(receivedHeaders[1]).toMatchObject({ authorization: "Bearer test-service-token" });
+  });
   it.each([
     { externalDomain: "", customHeaders: "", expectedHost: undefined },
     { externalDomain: "id.example.com", customHeaders: "", expectedHost: "id.example.com" },

@@ -6,9 +6,20 @@ import { spawn } from "node:child_process";
 import { createServer as createHttp2Server } from "node:http2";
 import { createServer as createTcpServer } from "node:net";
 import { once } from "node:events";
+import { createHash } from "node:crypto";
+import { EncryptJWT } from "jose";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { GetLoginSettingsResponseSchema, GetPasswordComplexitySettingsResponseSchema } from "@zitadel/proto/zitadel/settings/v2/settings_service_pb.js";
 import { GetAuthRequestRequestSchema, GetAuthRequestResponseSchema } from "@zitadel/proto/zitadel/oidc/v2/oidc_service_pb.js";
+import { GetSessionResponseSchema, ListSessionsResponseSchema } from "@zitadel/proto/zitadel/session/v2/session_service_pb.js";
+import { GetUserByIDResponseSchema, ListAuthenticationFactorsResponseSchema, ListPasskeysResponseSchema, UpdateHumanUserResponseSchema } from "@zitadel/proto/zitadel/user/v2/user_service_pb.js";
+import { ListUserMembershipsResponseSchema, ListAppsResponseSchema, GetAppByIDResponseSchema } from "@zitadel/proto/zitadel/management_pb.js";
+
+const fixtureUser = { userId: "fixture-user", username: "fixture-user", details: { resourceOwner: "fixture-org" }, type: { case: "human", value: { profile: { givenName: "Fixture", familyName: "User", displayName: "Portal Fixture", preferredLanguage: "zh-CN" }, email: { email: "fixture@example.test", isVerified: true } } } };
+const fixtureApp = { id: "fixture-app", name: "Portal Application", state: 1, config: { case: "oidcConfig", value: { clientId: "fixture-client", appType: 1, redirectUris: ["https://site.example.test/callback"], additionalOrigins: ["https://site.example.test"] } } };
+const fixtureSession = () => ({ id: "fixture-session", factors: { user: { id: "fixture-user" }, password: { verifiedAt: { seconds: BigInt(Math.floor(Date.now() / 1000)) } } } });
+const fixtureSecret = "local-fixture-session-secret-at-least-32-chars";
+const userRpcHeaders = [];
 
 // One deployment contract: every app-owned URL stays under BASE_PATH.
 // Check the actual production pages, responses, resources and Webpack loader.
@@ -65,6 +76,7 @@ upstream.on("stream", (stream, headers) => {
   stream.on("data", chunk => body.push(chunk));
   stream.on("end", () => {
     const path = headers[":path"];
+    if (path.includes(".ManagementService/") || path.endsWith("/UpdateHumanUser")) userRpcHeaders.push(headers);
     let schema, value;
     if (path.endsWith("/GetLoginSettings")) {
       schema = GetLoginSettingsResponseSchema;
@@ -76,6 +88,24 @@ upstream.on("stream", (stream, headers) => {
       const request = fromBinary(GetAuthRequestRequestSchema, Buffer.concat(body).subarray(5));
       schema = GetAuthRequestResponseSchema;
       value = { authRequest: { id: request.authRequestId, clientId: "fixture-client", redirectUri: "https://app.example.test/callback", scope: ["openid"] } };
+    } else if (path.endsWith("/GetSession")) {
+      schema = GetSessionResponseSchema; value = { session: fixtureSession() };
+    } else if (path.endsWith("/ListSessions")) {
+      schema = ListSessionsResponseSchema; value = { sessions: [fixtureSession()] };
+    } else if (path.endsWith("/GetUserByID")) {
+      schema = GetUserByIDResponseSchema; value = { user: fixtureUser };
+    } else if (path.endsWith("/ListAuthenticationFactors")) {
+      schema = ListAuthenticationFactorsResponseSchema; value = { result: [] };
+    } else if (path.endsWith("/ListPasskeys")) {
+      schema = ListPasskeysResponseSchema; value = { result: [] };
+    } else if (path.endsWith("/ListUserMemberships")) {
+      schema = ListUserMembershipsResponseSchema; value = { result: [{ userId: "fixture-user", details: { resourceOwner: "fixture-org" }, roles: ["PROJECT_OWNER"], type: { case: "projectId", value: "fixture-project" } }] };
+    } else if (path.endsWith("/ListApps")) {
+      schema = ListAppsResponseSchema; value = { result: [fixtureApp] };
+    } else if (path.endsWith("/GetAppByID")) {
+      schema = GetAppByIDResponseSchema; value = { app: fixtureApp };
+    } else if (path.endsWith("/UpdateHumanUser")) {
+      schema = UpdateHumanUserResponseSchema; value = {};
     } else {
       unexpectedRpc.add(path);
     }
@@ -123,7 +153,7 @@ async function checkDeployment(basePath, apiPort) {
       BASE_PATH: basePath || "/", APP_URL: "https://auth.example.test", SITE_NICKNAME: "Base path fixture", SITE_ICON: "",
       ZITADEL_API_URL: `http://127.0.0.1:${apiPort}`, ZITADEL_EXTERNALDOMAIN: "auth.example.test",
       ZITADEL_SERVICE_TOKEN: "local-fixture-token", ZITADEL_SERVICE_USER_TOKEN_FILE: "", CUSTOM_REQUEST_HEADERS: "",
-      ZITADEL_ORGANIZATION_ID: "", ZITADEL_SKIP_CONSENT_PROJECT_IDS: "", SESSION_SECRET: "local-fixture-session-secret-at-least-32-chars",
+      ZITADEL_ORGANIZATION_ID: "", ZITADEL_SKIP_CONSENT_PROJECT_IDS: "", SESSION_SECRET: fixtureSecret,
     }, stdio: ["ignore", "pipe", "pipe"],
   });
   let log = "";
@@ -155,6 +185,37 @@ async function checkDeployment(basePath, apiPort) {
         for (const match of html.matchAll(/content="[^"\n]*?url=([^"\n]+)"/gi)) checkUrl(match[1], url, basePath, `${route} refresh redirect`);
       }
     }
+    // Render the real authenticated portal and exercise its actual SDK adapter;
+    // no test-only application route and no real credentials are involved.
+    const jwt = await new EncryptJWT({ sessionId: "fixture-session", sessionToken: "fixture-user-session-token", userId: "fixture-user" })
+      .setProtectedHeader({ alg: "dir", enc: "A256GCM" }).setIssuer("https://auth.example.test")
+      .setAudience("wyid:authenticated-session").setIssuedAt().setExpirationTime("5m")
+      .encrypt(createHash("sha256").update(fixtureSecret).digest());
+    const accountHeaders = { Cookie: `__Host-wyid-session=${jwt}` };
+    for (const route of ["/account/apps", "/account/apps/new", "/account/apps/fixture-project:fixture-app", "/account/settings/profile", "/account/settings/security", "/account/settings/devices", "/account/help"]) {
+      const url = `${origin}${basePath}${route}`;
+      const response = await fetchLocal(url, { headers: accountHeaders });
+      assert.equal(response.status, 200, `${route}: authenticated portal failed\n${log}`);
+      const html = await response.text();
+      assert.ok(html.includes("Portal Fixture"), `${route}: missing authenticated account\n${log}`);
+      assert.ok(!html.includes("fixture-user-session-token"), `${route}: leaked a native credential`);
+      for (const match of html.matchAll(/\b(href|src|action)=["']([^"']*)["']/gi)) {
+        const target = checkUrl(match[2], url, basePath, `${route} authenticated ${match[1]}`);
+        if (target && /\/_next\//.test(target.pathname)) resources.set(target.href, target);
+      }
+    }
+    for (const [route, field] of [["/me", "account"], ["/me/methods", "methods"], ["/me/sessions", "devices"], ["/apps", "applications"], ["/apps/fixture-project:fixture-app", "application"]]) {
+      const response = await fetchLocal(`${origin}${basePath}/api/account${route}`, { headers: accountHeaders });
+      assert.equal(response.status, 200, `${route}: authenticated API failed\n${log}`);
+      const data = await response.json();
+      assert.ok(Object.hasOwn(data, field), `${route}: missing ${field}`);
+      assert.ok(!JSON.stringify(data).includes("fixture-user-session-token"), `${route}: leaked a native credential`);
+    }
+    const update = await fetchLocal(`${origin}${basePath}/api/account/me`, { method: "PATCH", headers: { ...accountHeaders, Origin: "https://auth.example.test", "Content-Type": "application/json" }, body: JSON.stringify({ displayName: "Portal Fixture", preferredLanguage: "en" }) });
+    assert.equal(update.status, 200, `Profile self-service mutation failed\n${log}`);
+    await update.arrayBuffer();
+    assert.ok(userRpcHeaders.some(h => h[":path"].endsWith("/ListApps") && h.authorization === "Bearer fixture-user-session-token"), "Application reads must use the user's native session token");
+    assert.ok(userRpcHeaders.some(h => h[":path"].endsWith("/UpdateHumanUser") && h.authorization === "Bearer fixture-user-session-token"), "Profile writes must use the user's native session token");
     for (const [url] of resources) {
       const response = await fetchLocal(url);
       assert.equal(response.status, 200, `Static resource failed: ${url}`);

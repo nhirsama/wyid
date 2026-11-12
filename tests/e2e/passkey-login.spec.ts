@@ -24,7 +24,7 @@ export async function startPasskey(input) {
   control.starts.push(input);
   const options = { challenge: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", rpId: "localhost", userVerification: "required" };
   if (input.chooseAccount || (!control.known && !input.userId)) {
-    return { ok: true, discoverUser: true, options: { ...options, userVerification: "discouraged" } };
+    return { ok: true, discoverUser: true, options };
   }
   if (input.userId && input.userId !== "fixture-user") return { ok: false, message: "账号不匹配。" };
   return { ok: true, options };
@@ -69,7 +69,7 @@ test.beforeAll(async () => {
   html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"></head><body><div id="root"></div><script>globalThis.process = { env: { NODE_ENV: "production" } };</script><script>${script}</script></body></html>`;
 });
 
-test("passkey login needs no username or extra click and only one ceremony for a remembered account", async ({ page, context }) => {
+test("passkey login needs no username or extra click and always discovers the account without a username", async ({ page, context }) => {
   const client = await context.newCDPSession(page);
   await client.send("WebAuthn.enable");
   const { authenticatorId } = await client.send("WebAuthn.addVirtualAuthenticator", { options: {
@@ -94,13 +94,13 @@ test("passkey login needs no username or extra click and only one ceremony for a
     await page.getByRole("button", { name: "使用通行密钥登录", exact: true }).click();
     await expect(page.getByText("登录成功。", { exact: true })).toBeVisible();
     expect(await page.evaluate("window.passkeyTest.gets")).toBe(2);
-    expect(await page.evaluate("window.passkeyTest.starts")).toEqual([{ chooseAccount: false }, { userId: "fixture-user" }]);
+    expect(await page.evaluate("window.passkeyTest.starts")).toEqual([{ chooseAccount: true }, { userId: "fixture-user" }]);
     expect(await page.evaluate("window.passkeyTest.finishes.length")).toBe(1);
     await expect(page.getByRole("button", { name: "继续使用通行密钥" })).toHaveCount(0);
 
     await page.getByRole("button", { name: "使用通行密钥登录", exact: true }).click();
     await expect.poll(() => page.evaluate("window.passkeyTest.finishes.length")).toBe(2);
-    expect(await page.evaluate("window.passkeyTest.gets")).toBe(3);
+    expect(await page.evaluate("window.passkeyTest.gets")).toBe(4);
 
     await expect(page.getByRole("button", { name: "选择其他通行密钥账号", exact: true })).toHaveCount(0);
   } finally {
