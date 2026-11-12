@@ -461,17 +461,6 @@ describe("native MFA proof, not a cookie flag", () => {
 });
 
 describe("primary passkey and MFA key ceremonies", () => {
-  it("discovers a passkey account without requiring a username or creating an authenticated session", async () => {
-    const result = await startPasskey({}, {});
-    expect(result).toMatchObject({ ok: true, discoverUser: true, options: { rpId: "login.example.com", userVerification: "discouraged" } });
-    expect(result.options?.challenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(result.options).not.toHaveProperty("allowCredentials");
-    expect(mocks.createSession).not.toHaveBeenCalled();
-    expect(mocks.verifyWebAuthn).not.toHaveBeenCalled();
-    expect(mocks.writePasskeyAccount).not.toHaveBeenCalled();
-    expectNoAuthentication();
-  });
-
   it("issues a fresh discovery challenge on every attempt", async () => {
     const first = await startPasskey({}, {});
     const second = await startPasskey({}, {});

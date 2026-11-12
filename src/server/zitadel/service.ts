@@ -31,12 +31,47 @@ function sessionRef(result: SessionRef): SessionRef {
   if (!result.sessionId || !result.sessionToken) throw new Error("ZITADEL returned an empty session");
   return { sessionId: result.sessionId, sessionToken: result.sessionToken };
 }
-function safeRedirect(value: string) {
+function safeRedirect(value: string, allowHttp?: boolean) {
   const url = new URL(value);
   const loopback = ["localhost", "127.0.0.1"].includes(url.hostname);
   const localHttp = process.env.NODE_ENV !== "production" && url.protocol === "http:" && loopback;
-  if ((url.protocol !== "https:" && !localHttp) || url.username || url.password) throw new Error("Invalid upstream redirect");
+  // OIDC callbacks pass an explicit application policy, overriding the local
+  // development fallback used by identity-provider redirects.
+  if ((url.protocol !== "https:" && !(url.protocol === "http:" && (allowHttp ?? localHttp))) || url.username || url.password) throw new Error("Invalid upstream redirect");
   return value;
+}
+async function findOidcApplication(clientId: string) {
+  if (!clientId) return undefined;
+  let projectOffset = 0n;
+  for (;;) {
+    const projects = await getClients().management.listProjects({ query: { offset: projectOffset, limit: 100, asc: false }, queries: [] });
+    for (const project of projects.result) {
+      let appOffset = 0n;
+      for (;;) {
+        const apps = await getClients().management.listApps({ projectId: project.id, query: { offset: appOffset, limit: 100, asc: false }, queries: [] });
+        const match = apps.result.find(app => app.config.case === "oidcConfig" && app.config.value.clientId === clientId);
+        if (match) return match;
+        const next = appOffset + BigInt(apps.result.length);
+        if (!apps.result.length || next <= appOffset || next >= (apps.details?.totalResult ?? BigInt(apps.result.length))) break;
+        appOffset = next;
+      }
+    }
+    const next = projectOffset + BigInt(projects.result.length);
+    if (!projects.result.length || next <= projectOffset || next >= (projects.details?.totalResult ?? BigInt(projects.result.length))) break;
+    projectOffset = next;
+  }
+  return undefined;
+}
+async function callbackAllowsHttp(request: AuthRequest) {
+  const http = new URL(request.redirectUri).protocol === "http:";
+  safeRedirect(request.redirectUri, http);
+  if (!http) return false;
+  // Check before CreateCallback consumes the request. Unknown or unreadable
+  // application settings must not grant an HTTP exemption, and are not MFA errors.
+  const app = await findOidcApplication(request.clientId).catch(() => undefined);
+  if (!app) throw new AuthError("无法读取当前应用的开发模式，不允许使用 HTTP 回调。");
+  if (app.config.case !== "oidcConfig" || app.config.value.devMode !== true) throw new AuthError("当前应用未开启开发模式，不允许使用 HTTP 回调。");
+  return true;
 }
 function mailTemplate(path: string, authRequestId?: string) {
   const base = siteUrl(path, getConfig().appUrl);
@@ -72,26 +107,8 @@ export const zitadel = {
     return false;
   },
   async applicationName(clientId: string) {
-    if (!clientId) return "";
     try {
-      let projectOffset = 0n;
-      for (;;) {
-        const projects = await getClients().management.listProjects({ query: { offset: projectOffset, limit: 100, asc: false }, queries: [] });
-        for (const project of projects.result) {
-          let appOffset = 0n;
-          for (;;) {
-            const apps = await getClients().management.listApps({ projectId: project.id, query: { offset: appOffset, limit: 100, asc: false }, queries: [] });
-            const match = apps.result.find(app => app.config.case === "oidcConfig" && app.config.value.clientId === clientId);
-            if (match?.name.trim()) return match.name.trim();
-            const next = appOffset + BigInt(apps.result.length);
-            if (!apps.result.length || next <= appOffset || next >= (apps.details?.totalResult ?? BigInt(apps.result.length))) break;
-            appOffset = next;
-          }
-        }
-        const next = projectOffset + BigInt(projects.result.length);
-        if (!projects.result.length || next <= projectOffset || next >= (projects.details?.totalResult ?? BigInt(projects.result.length))) break;
-        projectOffset = next;
-      }
+      return (await findOidcApplication(clientId))?.name.trim() || "";
     } catch {
       // The redirect host remains a useful display fallback when this service
       // account cannot inspect an application or project.
@@ -169,12 +186,14 @@ export const zitadel = {
     return [...factors];
   },
   async callback(authRequestId: string, session: SessionRef) {
+    const allowHttp = await callbackAllowsHttp(await this.authRequest(authRequestId));
     const result = await getClients().oidc.createCallback(create(CreateCallbackRequestSchema, { authRequestId, callbackKind: { case: "session", value: session } }));
-    return safeRedirect(result.callbackUrl);
+    return safeRedirect(result.callbackUrl, allowHttp);
   },
   async deny(authRequestId: string, reason = ErrorReason.ACCESS_DENIED) {
+    const allowHttp = await callbackAllowsHttp(await this.authRequest(authRequestId));
     const result = await getClients().oidc.createCallback({ authRequestId, callbackKind: { case: "error", value: { error: reason } } });
-    return safeRedirect(result.callbackUrl);
+    return safeRedirect(result.callbackUrl, allowHttp);
   },
   async register(input: RegisterInput, organizationId?: string, authRequestId?: string) {
     const username = input.username.trim();

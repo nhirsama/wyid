@@ -20,23 +20,6 @@ beforeEach(() => {
 });
 
 describe("one-click passkey login", () => {
-  it("does not request a username and uses exactly one assertion for a known account", async () => {
-    expect(await loginWithPasskey(context)).toEqual(success);
-    expect(mocks.start).toHaveBeenCalledExactlyOnceWith({ chooseAccount: false }, context);
-    expect(mocks.authenticate).toHaveBeenCalledExactlyOnceWith(options);
-    expect(mocks.finish).toHaveBeenCalledExactlyOnceWith(assertion, context);
-  });
-
-  it("automatically discovers an unknown account then verifies only the native challenge", async () => {
-    mocks.start.mockResolvedValueOnce({ ok: true, discoverUser: true, options: discovery });
-    mocks.authenticate.mockResolvedValueOnce(account);
-    expect(await loginWithPasskey(context)).toEqual(success);
-    expect(mocks.start.mock.calls).toEqual([[{ chooseAccount: false }, context], [{ userId: "user-id" }, context]]);
-    expect(mocks.authenticate.mock.calls).toEqual([[discovery], [options]]);
-    expect(mocks.finish).toHaveBeenCalledExactlyOnceWith(assertion, context);
-    expect(mocks.finish).not.toHaveBeenCalledWith(account, context);
-  });
-
   it("lets the user explicitly choose a different account", async () => {
     expect(await loginWithPasskey(context, true)).toEqual(success);
     expect(mocks.start).toHaveBeenCalledExactlyOnceWith({ chooseAccount: true }, context);

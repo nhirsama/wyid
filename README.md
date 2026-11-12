@@ -24,6 +24,8 @@
 
 子路径部署时，将 `BASE_PATH` 设为相应路径，并在反向代理与 ZITADEL 中配置完整登录地址，例如 `https://login.example.com/auth/login`。修改运行时环境变量后重启容器生效，无需重新构建镜像。
 
+OIDC 回调默认要求 HTTPS。只有当前 ZITADEL 应用开启 Development Mode，且服务账号能读取该应用配置时，才允许 HTTP 回调；此规则不受登录站点的 `NODE_ENV` 影响。成功授权和拒绝授权均使用相同规则。
+
 ## 2. 发布并运行镜像
 
 推送 Git tag 后，CI 会构建并发布 `linux/amd64` 与 `linux/arm64` 镜像到 GHCR。使用对应 tag 部署：
