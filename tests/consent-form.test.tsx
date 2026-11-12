@@ -23,4 +23,16 @@ describe("reference consent presentation", () => {
     expect(html).not.toContain("app-host");
     expect(html).toContain('method="post"');
   });
+
+  it("omits the generic description only for the exact project roles scope", () => {
+    const rolesScope = "urn:zitadel:iam:org:project:roles";
+    const html = renderToStaticMarkup(<ConsentForm authRequestId="V2_test" consentToken="token" appName="Test App"
+      displayName="测试账号" email="user@example.test" scopes={["openid", rolesScope, "custom:read", `${rolesScope}:read`]} />);
+    expect(html).toContain(`<li><code>${rolesScope}</code></li>`);
+    expect(html).toContain("<strong>账号标识</strong>：用于在该网站识别你的账号。 <code>openid</code>");
+    for (const scope of ["custom:read", `${rolesScope}:read`]) {
+      expect(html).toContain(`<strong>其他请求权限</strong>：此网站请求的额外权限。 <code>${scope}</code>`);
+    }
+    expect(html.match(/<li>/g)).toHaveLength(4);
+  });
 });
