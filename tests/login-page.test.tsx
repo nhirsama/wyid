@@ -35,7 +35,8 @@ beforeEach(() => {
 describe("login presentation is independent of the authorization entry point", () => {
   it.each([{}, { authRequest: "V2_test" }, { authRequestId: "V2_test" }])("keeps the same heading and description for %j", async params => {
     const html = renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve(params) }));
-    expect(html).toContain("登录 WY ID");
+    expect(html).toContain("登录账号");
+    expect(html).not.toContain("登录 WY ID");
     expect(html).toContain("一个账号，连接你的网站。");
     expect(html).toContain("login-form");
     expect(html).not.toContain("Management Console");

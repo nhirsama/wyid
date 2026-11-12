@@ -39,7 +39,6 @@ export default function NotFound() {
           <AppLink className="button primary-button" href="/login">回到登录页</AppLink>
         </div>
       </section>
-      <footer className="auth-footer"><span>{brand.nickname}</span><span aria-hidden="true">·</span><span>账号与单点登录</span></footer>
     </main>
   );
 }

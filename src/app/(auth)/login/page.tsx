@@ -6,7 +6,6 @@ import { zitadel } from "@/server/zitadel/service";
 import { Notice } from "@/components/ui/form";
 import { ErrorReason, Prompt } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
 import { redirect } from "next/navigation";
-import { getBrand } from "@/server/brand";
 import { actionError } from "@/server/errors";
 import { AppLink } from "@/components/ui/app-link";
 import { ResumeLoginForm } from "@/components/auth/resume-login-form";
@@ -17,8 +16,7 @@ export const metadata = { title: "登录" };
 export default async function LoginPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
   const context = authContext(params);
-  const brand = getBrand();
-  const panel = { title: `登录 ${brand.nickname}`, description: "一个账号，连接你的网站。" };
+  const panel = { title: "登录账号", description: "一个账号，连接你的网站。" };
   let request: Awaited<ReturnType<typeof zitadel.authRequest>> | undefined;
   let policy: LoginPolicy | undefined;
   let callbackUrl: string | undefined;

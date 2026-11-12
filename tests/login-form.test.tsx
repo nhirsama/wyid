@@ -22,6 +22,8 @@ describe("existing login page presentation", () => {
     expect(html).not.toContain("或使用密码登录");
     expect(html).not.toContain("继续使用通行密钥");
     expect(html).not.toContain("验证请求已准备好");
+    expect(html).not.toContain("输入你的邮箱或用户名");
+    expect(html).not.toContain("输入你的密码");
   });
 
   it("keeps the original account field and passkey button without a password when password login is disabled", () => {

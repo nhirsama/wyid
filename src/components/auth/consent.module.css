@@ -17,8 +17,6 @@
 :global(.auth-page):has(.card) :global(.auth-brand) { margin: 0 0 26px; }
 :global(.auth-page):has(.card) :global(.auth-brand) span { font-size: 23px; font-weight: 600; letter-spacing: -.5px; }
 :global(.auth-page):has(.card) :global(.auth-brand) img { height: 39px; }
-:global(.auth-page):has(.card) :global(.auth-footer) { display: block; }
-:global(.auth-page):has(.card) :global(.auth-footer) > span + span::before { content: " "; white-space: pre; }
 
 .card {
   --text: #374665;

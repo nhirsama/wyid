@@ -32,10 +32,10 @@ export function LoginForm({ context, policy }: Props) {
       <Feedback result={action.result} />
       <fieldset disabled={action.pending || webauthn.pending} className="form-fieldset">
         {(policy.password || policy.passkey) && <Field label="邮箱或用户名" registration={form.register("loginName")} error={form.formState.errors.loginName?.message}
-          autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="输入你的邮箱或用户名" maxLength={320} />}
+          autoComplete="username" autoCapitalize="none" spellCheck={false} maxLength={320} />}
         {policy.password && <>
           <Field label="密码" type="password" registration={form.register("password")} error={form.formState.errors.password?.message}
-            autoComplete="current-password" placeholder="输入你的密码" maxLength={1024} />
+            autoComplete="current-password" maxLength={1024} />
           <div className="form-links"><AppLink href={authLink("/forgot-password", context)}>忘记密码？</AppLink></div>
           <Submit pending={action.pending}>登录</Submit>
         </>}

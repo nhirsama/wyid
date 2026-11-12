@@ -23,8 +23,7 @@ test("serves static assets and keeps not-found links under the base path", async
   await expect(page.locator('link[rel="stylesheet"][href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.2.8/latin-400.css"]')).toHaveCount(1);
   await expect(page.getByRole("link", { name: "回到登录页" })).toHaveAttribute("href", path("/login"));
   await expect(page.getByRole("heading", { name: "好像走错地方了" })).toBeVisible();
-  const brandName = await page.locator(".auth-brand").innerText();
-  await expect(page.locator(".auth-footer")).toContainText(brandName);
+  await expect(page.locator(".auth-footer")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "跳到主要内容" })).toHaveAttribute("href", /#main-content$/);
   const stylesheetUrls = await page.locator('link[rel="stylesheet"]').evaluateAll(links => links
     .map(link => new URL((link as HTMLLinkElement).href))

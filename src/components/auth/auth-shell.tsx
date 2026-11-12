@@ -15,9 +15,6 @@ export function AuthShell({ children }: { children: ReactNode }) {
           <span>{brand.nickname}</span>
         </div>
         {children}
-        <footer className="auth-footer">
-          <span>{brand.nickname}</span><span aria-hidden="true">·</span><span>账号与单点登录</span>
-        </footer>
       </div>
     </main>
   );
