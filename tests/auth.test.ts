@@ -82,4 +82,14 @@ describe("OAuth consent scopes", () => {
       { scope: "custom:read", name: "其他请求权限", description: "此网站请求的额外权限。" },
     ]);
   });
+  it("omits project role scopes from consent without mutating the authorization scopes", () => {
+    const scopes = ["openid", "urn:zitadel:iam:org:project:role:member", "email", "urn:zitadel:iam:org:project:role:admin", "openid"];
+    const original = [...scopes];
+    expect(consentScopes(scopes).map(item => item.scope)).toEqual(["openid", "email"]);
+    expect(scopes).toEqual(original);
+  });
+  it("does not hide other scopes with similar names", () => {
+    const scopes = ["custom:read", "urn:zitadel:iam:org:project:roles", "urn:zitadel:iam:org:project:roles:read", "urn:zitadel:iam:org:project:role"];
+    expect(consentScopes(scopes).map(item => item.scope)).toEqual(scopes);
+  });
 });

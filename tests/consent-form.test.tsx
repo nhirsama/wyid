@@ -24,15 +24,27 @@ describe("reference consent presentation", () => {
     expect(html).toContain('method="post"');
   });
 
-  it("omits the generic description only for the exact project roles scope", () => {
-    const rolesScope = "urn:zitadel:iam:org:project:roles";
+  it("hides project role entries entirely, not just their descriptions", () => {
+    const memberScope = "urn:zitadel:iam:org:project:role:member";
+    const adminScope = "urn:zitadel:iam:org:project:role:admin";
     const html = renderToStaticMarkup(<ConsentForm authRequestId="V2_test" consentToken="token" appName="Test App"
-      displayName="测试账号" email="user@example.test" scopes={["openid", rolesScope, "custom:read", `${rolesScope}:read`]} />);
-    expect(html).toContain(`<li><code>${rolesScope}</code></li>`);
+      displayName="测试账号" email="user@example.test" scopes={["openid", memberScope, "email", adminScope, memberScope]} />);
+    expect(html).not.toContain(memberScope);
+    expect(html).not.toContain(adminScope);
+    expect(html).not.toContain("其他请求权限");
+    expect(html).not.toContain("此网站请求的额外权限。");
     expect(html).toContain("<strong>账号标识</strong>：用于在该网站识别你的账号。 <code>openid</code>");
-    for (const scope of ["custom:read", `${rolesScope}:read`]) {
+    expect(html).toContain("<strong>邮箱</strong>：邮箱地址及邮箱验证状态。 <code>email</code>");
+    expect(html.match(/<li>/g)).toHaveLength(2);
+  });
+
+  it("keeps descriptions for unknown scopes, including similarly named scopes", () => {
+    const scopes = ["custom:read", "urn:zitadel:iam:org:project:roles", "urn:zitadel:iam:org:project:roles:read"];
+    const html = renderToStaticMarkup(<ConsentForm authRequestId="V2_test" consentToken="token" appName="Test App"
+      displayName="测试账号" email="user@example.test" scopes={scopes} />);
+    for (const scope of scopes) {
       expect(html).toContain(`<strong>其他请求权限</strong>：此网站请求的额外权限。 <code>${scope}</code>`);
     }
-    expect(html.match(/<li>/g)).toHaveLength(4);
+    expect(html.match(/<li>/g)).toHaveLength(scopes.length);
   });
 });

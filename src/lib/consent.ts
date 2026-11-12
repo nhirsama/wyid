@@ -7,8 +7,12 @@ const scopeDescriptions: Record<string, { name: string; description: string }> =
   offline_access: { name: "离线访问", description: "网站可在你离线时继续使用获准的访问权限。" },
 };
 
+const projectRoleScopePrefix = "urn:zitadel:iam:org:project:role:";
+
 export function consentScopes(scopes: string[]) {
-  return [...new Set(scopes)].map(scope => ({
+  // Project settings can add role scopes upstream. Omit them from the display
+  // only; the original request must retain all scopes for consent validation.
+  return [...new Set(scopes)].filter(scope => !scope.startsWith(projectRoleScopePrefix)).map(scope => ({
     scope,
     ...(Object.hasOwn(scopeDescriptions, scope)
       ? scopeDescriptions[scope]

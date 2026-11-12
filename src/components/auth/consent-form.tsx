@@ -44,7 +44,7 @@ export function ConsentForm({ authRequestId, consentToken, scopes, appName, appH
     <Feedback result={action.result} />
     <p className={styles.bodyCopy}><strong>{appName}</strong>{appHost && appHost !== appName && <>（{appHost}）</>} 申请访问以下账号信息和权限，是否允许？</p>
     <div className={styles.accountChoice}><ConsentAvatar displayName={displayName} email={email} avatarUrl={avatarUrl} /><div><strong>{displayName}</strong><small>{email}</small></div></div>
-    <ul className={styles.scopeList} aria-label="网站请求的账号信息与权限">{consentScopes(scopes).map(item => <li key={item.scope}>{item.scope !== "urn:zitadel:iam:org:project:roles" && <><strong>{item.name}</strong>：{item.description} </>}<code>{item.scope}</code></li>)}</ul>
+    <ul className={styles.scopeList} aria-label="网站请求的账号信息与权限">{consentScopes(scopes).map(item => <li key={item.scope}><strong>{item.name}</strong>：{item.description} <code>{item.scope}</code></li>)}</ul>
     <div className={styles.formActions}><button type="button" className={styles.smallButton} disabled={disabled} onClick={() => decision(false)}>取消</button><button type="submit" className={styles.primaryButton} disabled={disabled} aria-busy={action.pending}>{action.pending ? "正在处理…" : "允许"}</button></div>
   </form>;
 }

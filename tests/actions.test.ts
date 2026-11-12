@@ -390,6 +390,16 @@ describe("ZITADEL server actions", () => {
     expect(mocks.callback).not.toHaveBeenCalled();
     expect(mocks.deny).not.toHaveBeenCalled();
   });
+  it("still binds hidden project role scopes to the OAuth confirmation token", async () => {
+    const pending = pendingSession();
+    const token = consentToken(authorization, pending, mocks.config().sessionSecret);
+    mocks.readPendingSession.mockResolvedValue(pending);
+    mocks.authRequest.mockResolvedValue({ ...authorization, scope: [...authorization.scope, "urn:zitadel:iam:org:project:role:member"] });
+    const result = await decideConsent({ authRequestId: "V2_test", consentToken: token, allow: true });
+    expect(result).toEqual({ ok: false, message: "授权请求或登录账号已变化，请重新确认。" });
+    expect(mocks.callback).not.toHaveBeenCalled();
+    expect(mocks.deny).not.toHaveBeenCalled();
+  });
   it("rechecks MFA policy when the user confirms OAuth access", async () => {
     const pending = { authRequestId: "V2_test", sessionId: "session-id", sessionToken: "session-token", methods: [], userId: "user-id" };
     const request = { id: "V2_test", clientId: "client-id", redirectUri: "https://app.example.com/callback", scope: ["openid"], prompt: [] };
