@@ -9,7 +9,8 @@ import { BrandProvider } from "@/components/auth/brand-provider";
 import { AccountPortal } from "@/components/account/portal";
 const account = { id: "user", displayName: "测试账号", givenName: "Given", familyName: "Family", email: "user@example.com", emailVerified: true, preferredLanguage: "zh-CN" };
 const config = { configured: true, missing: [], issuer: "https://id.example.com", loginMethods: { password: true, registration: true, passkey: true }, passwordPolicy: { minLength: 8, hasUppercase: true, hasLowercase: true, hasNumber: true, hasSymbol: false } };
-createRoot(document.getElementById("root")).render(<BrandProvider brand={{ nickname: "Test ID" }} basePath="/id"><AccountPortal route={window.location.pathname.replace("/id/account", "")} initialAccount={account} config={config} /></BrandProvider>);
+const basePath = document.documentElement.dataset.basePath || "";
+createRoot(document.getElementById("root")).render(<BrandProvider brand={{ nickname: "Test ID" }} basePath={basePath}><AccountPortal route={window.location.pathname.slice((basePath + "/account").length)} initialAccount={account} config={config} /></BrandProvider>);
 `;
 let html: string;
 let javascript: string;
@@ -37,16 +38,19 @@ test.beforeAll(async () => {
   html = `<!doctype html><html lang="zh-CN" data-base-path="/id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>`;
 });
 const initialApp = { id: "project:app", projectId: "project", name: "测试网站", website: "https://site.example.com", type: "spa", enabled: true, clientId: "client-id", redirectUris: ["https://site.example.com/callback"], postLogoutRedirectUris: [], createdAt: "2026-11-12T00:00:00Z", updatedAt: "2026-11-12T00:00:00Z" };
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ context }) => {
   const apps = [structuredClone(initialApp)];
   const methods: { type: string; id?: string; name: string; state: string }[] = [];
   const calls: { path: string; method: string; data: Record<string, unknown> }[] = [];
   let credentialId = "";
-  await page.route("**/*", async route => {
+  await context.route("**/*", async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     if (path === "/fixture.js") return route.fulfill({ contentType: "text/javascript; charset=utf-8", body: javascript });
-    if (!path.startsWith("/id/api/account")) return route.fulfill({ contentType: "text/html; charset=utf-8", body: html });
-    const endpoint = path.slice("/id/api/account".length), method = request.method();
+    if (!path.includes("/api/account/")) {
+      const basePath = path.slice(0, path.lastIndexOf("/account/"));
+      return route.fulfill({ contentType: "text/html; charset=utf-8", body: html.replace('data-base-path="/id"', `data-base-path="${basePath}"`) });
+    }
+    const endpoint = path.slice(path.indexOf("/api/account") + "/api/account".length), method = request.method();
     const data = method === "GET" ? {} : request.postDataJSON() || {};
     calls.push({ path: endpoint, method, data });
     let value: unknown = {};
@@ -92,6 +96,140 @@ test("applications, base-path navigation, create wizard and exact callback field
   await page.getByRole("button", { name: "显示密钥", exact: true }).click();
   await expect(page.getByText("one-time-secret", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "进入应用详情" })).toHaveAttribute("href", "/id/account/apps/project:new-app");
+  await page.getByRole("link", { name: "进入应用详情" }).click();
+  await expect(page).toHaveURL("http://localhost/id/account/apps/project:new-app");
+  await expect(page.getByRole("heading", { name: "新的服务端网站", exact: true })).toBeVisible();
+});
+
+for (const basePath of ["", "/id", "/account/login-ui"]) {
+  test(`portal navigation and history preserve the document and cached lists under ${basePath || "/"}`, async ({ page }) => {
+    const navigations: string[] = [];
+    const reads: string[] = [];
+    page.on("request", request => {
+      if (request.isNavigationRequest()) navigations.push(request.url());
+      if (request.method() === "GET" && request.url().includes("/api/account/")) reads.push(new URL(request.url()).pathname);
+    });
+    await page.goto(`http://localhost${basePath}/account/apps`);
+    await expect(page.getByRole("link", { name: "测试网站", exact: true })).toBeVisible();
+    const shell = await page.locator(".portal").elementHandle();
+    await page.getByRole("link", { name: "测试网站", exact: true }).click();
+    await expect(page).toHaveURL(`http://localhost${basePath}/account/apps/project:app`);
+    await expect(page.getByRole("heading", { name: "测试网站", exact: true })).toBeVisible();
+    await page.goBack();
+    await expect(page.getByRole("heading", { name: "我的应用", exact: true })).toBeVisible();
+    await page.goForward();
+    await expect(page.getByRole("heading", { name: "测试网站", exact: true })).toBeVisible();
+    await page.locator(".back-link").click();
+    await expect(page.getByRole("heading", { name: "我的应用", exact: true })).toBeVisible();
+    expect(await shell!.evaluate(node => node.isConnected)).toBe(true);
+    expect(navigations).toHaveLength(1);
+    expect(reads.filter(path => path === `${basePath}/api/account/apps`)).toHaveLength(1);
+    expect(reads.filter(path => path.includes("/apps/project"))).toHaveLength(1);
+  });
+}
+
+test("profile saves survive a page switch without refetching the entire portal", async ({ page }) => {
+  await page.goto("http://localhost/id/account/settings/profile");
+  await page.getByLabel("昵称", { exact: true }).fill("新的昵称");
+  await page.getByRole("button", { name: "保存资料", exact: true }).click();
+  await expect(page.getByText("个人资料已保存。", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "密码与验证方式", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "两步验证", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "个人资料与邮箱", exact: true }).click();
+  await expect(page.getByLabel("昵称", { exact: true })).toHaveValue("新的昵称");
+  await expect(page.locator(".sidebar-user strong")).toHaveText("新的昵称");
+});
+
+test("programmatic navigation after deletion invalidates the list without reloading", async ({ page }) => {
+  await page.goto("http://localhost/id/account/apps");
+  await page.getByRole("link", { name: "测试网站", exact: true }).click();
+  const shell = await page.locator(".portal").elementHandle();
+  await page.getByRole("tab", { name: "应用设置", exact: true }).click();
+  await page.getByRole("button", { name: "删除", exact: true }).click();
+  await page.getByRole("button", { name: "确认", exact: true }).click();
+  await expect(page).toHaveURL("http://localhost/id/account/apps");
+  await expect(page.getByRole("heading", { name: "创建你的第一个应用", exact: true })).toBeVisible();
+  expect(await shell!.evaluate(node => node.isConnected)).toBe(true);
+});
+
+test("focus and visibility changes throttle background checks without evicting lists", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("http://localhost/id/account/apps");
+  await expect(page.getByRole("link", { name: "测试网站", exact: true })).toBeVisible();
+  const checks: string[] = [];
+  page.on("request", request => { if (new URL(request.url()).pathname === "/id/api/account/me") checks.push(request.url()); });
+  const focus = () => page.evaluate(() => {
+    for (let i = 0; i < 10; i++) {
+      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
+    }
+  });
+  await focus();
+  expect(checks).toHaveLength(0);
+  await page.clock.fastForward(60_001);
+  await focus();
+  await expect.poll(() => checks.length).toBe(1);
+  await focus();
+  expect(checks).toHaveLength(1);
+  await page.getByRole("link", { name: "测试网站", exact: true }).click();
+  await page.locator(".back-link").click();
+  const calls = await page.evaluate(async () => (await (await fetch("/id/api/account/test-calls")).json()).calls);
+  // The cache has expired after a minute, so exactly one fresh list read is needed.
+  expect(calls.filter((call: { path: string }) => call.path === "/apps")).toHaveLength(2);
+});
+
+test("a temporary background refresh failure does not claim the session expired", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("http://localhost/id/account/apps");
+  await expect(page.getByRole("link", { name: "测试网站", exact: true })).toBeVisible();
+  await page.route("**/api/account/me", route => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "unavailable", message: "稍后重试" } }) }));
+  await page.clock.fastForward(60_001);
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(page.getByRole("alert")).toContainText("暂时无法刷新账号资料");
+  await expect(page.getByRole("link", { name: "继续身份验证", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "测试网站", exact: true })).toBeVisible();
+});
+
+test("an expired background session still requires server-owned authentication", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("http://localhost/id/account/apps");
+  await expect(page.getByRole("link", { name: "测试网站", exact: true })).toBeVisible();
+  await page.route("**/api/account/me", route => route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ error: { code: "session_expired", message: "重新登录" } }) }));
+  await page.clock.fastForward(60_001);
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(page.getByRole("alert")).toContainText("登录状态发生变化");
+  await expect(page.getByRole("link", { name: "继续身份验证", exact: true })).toHaveAttribute("href", "/id/account");
+});
+
+test("switching accounts in another tab discards the previous principal's document", async ({ page }) => {
+  await page.clock.install();
+  const documents: string[] = [];
+  page.on("request", request => { if (request.isNavigationRequest()) documents.push(request.url()); });
+  await page.goto("http://localhost/id/account/apps");
+  await expect(page.getByRole("link", { name: "测试网站", exact: true })).toBeVisible();
+  await page.route("**/api/account/me", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({ account: { id: "another-user", displayName: "其他账号" } }) }));
+  await page.clock.fastForward(60_001);
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect.poll(() => documents.length).toBe(2);
+  await expect(page.locator(".sidebar-user strong")).not.toHaveText("其他账号");
+});
+
+test("modified link clicks are left to the browser instead of portal navigation", async ({ page }) => {
+  await page.goto("http://localhost/id/account/apps");
+  const link = page.getByRole("link", { name: "测试网站", exact: true });
+  await expect(link).toBeVisible();
+  for (const modifier of ["ctrlKey", "metaKey", "shiftKey", "altKey"]) {
+    const intercepted = await link.evaluate((node, modifier) => {
+      let prevented = false;
+      // Observe after React's delegated handler, then suppress the actual OS
+      // tab/window gesture to make this check work in headless/mobile Chrome.
+      document.addEventListener("click", event => { prevented = event.defaultPrevented; event.preventDefault(); }, { once: true });
+      node.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, [modifier]: true }));
+      return prevented;
+    }, modifier);
+    expect(intercepted, modifier).toBe(false);
+  }
+  await expect(page).toHaveURL("http://localhost/id/account/apps");
 });
 
 test("profile fields and TOTP QR setup work in the current visual shell", async ({ page }, testInfo) => {

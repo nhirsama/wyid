@@ -23,7 +23,8 @@ const userRpcHeaders = [];
 
 // One deployment contract: every app-owned URL stays under BASE_PATH.
 // Check the actual production pages, responses, resources and Webpack loader.
-// All upstream traffic goes to a local fixture; no browser or real account.
+// All upstream traffic goes to a local fixture; no real account is involved.
+// Pass --browser to also exercise navigation in the actual production client.
 const chunks = join(process.cwd(), ".next/static/chunks");
 const entries = readdirSync(chunks).filter(name => /^main-app-.*\.js$/.test(name));
 assert.equal(entries.length, 1, "Build the app with pnpm build before checking its assets");
@@ -142,6 +143,48 @@ const originalManifests = new Map(readdirSync(".next/server/app", { recursive: t
   .filter(path => path.endsWith("_client-reference-manifest.js"))
   .map(path => { const file = join(".next/server/app", path); return [file, readFileSync(file, "utf8")]; }));
 
+let browser;
+async function checkPortalBrowser(origin, basePath, jwt) {
+  const { expect } = await import("@playwright/test");
+  const context = await browser.newContext();
+  try {
+    await context.addCookies([{ name: "__Host-wyid-session", value: jwt, domain: new URL(origin).hostname, path: "/", secure: true, httpOnly: true, sameSite: "Lax" }]);
+    // The check is deliberately local-only, including font stylesheets.
+    await context.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.fulfill({ body: "", contentType: "text/css" }));
+    const page = await context.newPage();
+    const documents = [], failures = [], reads = [];
+    page.on("pageerror", error => failures.push(error.message));
+    page.on("request", request => {
+      if (request.isNavigationRequest()) documents.push(request.url());
+      if (request.url().includes("/api/account/apps")) reads.push(request.url());
+    });
+    page.on("response", response => { if (response.url().startsWith(origin) && response.status() >= 400) failures.push(`${response.status()} ${response.url()}`); });
+    await page.goto(`${origin}${basePath}/account/apps`);
+    await expect(page.getByRole("link", { name: "Portal Application", exact: true })).toBeVisible();
+    const shell = await page.locator(".portal").elementHandle();
+    await page.getByRole("link", { name: "Portal Application", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Portal Application", exact: true })).toBeVisible();
+    await page.goBack();
+    await expect(page.getByRole("heading", { name: "我的应用", exact: true })).toBeVisible();
+    await page.goForward();
+    await expect(page.getByRole("heading", { name: "Portal Application", exact: true })).toBeVisible();
+    await page.locator(".sidebar").getByRole("link", { name: "账号设置", exact: true }).click();
+    await expect(page.getByLabel("昵称", { exact: true })).toHaveValue("Portal Fixture");
+    await page.getByRole("link", { name: "密码与验证方式", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "两步验证", exact: true })).toBeVisible();
+    await page.locator(".sidebar").getByRole("link", { name: "我的应用", exact: true }).click();
+    await expect(page.getByRole("link", { name: "Portal Application", exact: true })).toBeVisible();
+    assert.equal(await shell.evaluate(node => node.isConnected), true, "Portal shell was remounted");
+    assert.equal(documents.length, 1, "Portal navigation reloaded the document");
+    assert.equal(reads.length, 2, "Portal revisits did not reuse their private data cache");
+    assert.deepEqual(failures, [], "Production client failed during navigation");
+    // Reloading a deep link still renders the server-validated page correctly.
+    await page.goto(`${origin}${basePath}/account/apps/fixture-project%3Afixture-app`);
+    await expect(page.getByRole("heading", { name: "Portal Application", exact: true })).toBeVisible();
+    console.log(`PASS browser BASE_PATH=${basePath || "/"}: one document, stable portal shell, history, private cache and deep links`);
+  } finally { await context.close(); }
+}
+
 async function checkDeployment(basePath, apiPort) {
   const reservation = createTcpServer();
   const port = await listen(reservation);
@@ -245,6 +288,7 @@ async function checkDeployment(basePath, apiPort) {
       await result.arrayBuffer();
     }
     checkChunkLoader(basePath);
+    if (browser) await checkPortalBrowser(origin, basePath, jwt);
     console.log(`PASS BASE_PATH=${basePath || "/"}: ${routes.length} routes, links, forms, redirects, ${resources.size} assets, CSS URLs, lazy chunks`);
   } finally {
     child.kill("SIGTERM");
@@ -254,9 +298,14 @@ async function checkDeployment(basePath, apiPort) {
 
 try {
   const apiPort = await listen(upstream);
+  if (process.argv.includes("--browser")) {
+    const { chromium } = await import("@playwright/test");
+    browser = await chromium.launch({ channel: "chrome", args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+  }
   for (const basePath of ["", "/123", "/account/login-ui"]) await checkDeployment(basePath, apiPort);
   assert.equal(unexpectedRpc.size, 0, `Unhandled fixture RPCs: ${[...unexpectedRpc].join(", ")}`);
 } finally {
+  await browser?.close();
   for (const [file, content] of originalManifests) writeFileSync(file, content);
   for (const session of sessions) session.destroy();
   if (upstream.listening) await new Promise(resolve => upstream.close(resolve));

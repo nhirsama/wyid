@@ -58,6 +58,7 @@ export async function api<T>(pathname: string, options: RequestInit = {}): Promi
   catch (cause) { throw new ApiError(response.ok ? 502 : response.status, "invalid_response", "服务响应异常，请稍后重试。", requestId, { cause }); }
   if (!response.ok) {
     const error = data && typeof data === "object" ? (data as Partial<ApiErrorBody>).error : undefined;
+    if (error?.code === "authentication_incomplete") clearApiCache();
     throw new ApiError(response.status, typeof error?.code === "string" && error.code ? error.code : "request_failed", typeof error?.message === "string" && error.message.trim() ? error.message : "请求失败，请稍后重试。", typeof error?.requestId === "string" && error.requestId ? error.requestId : requestId);
   }
   if (!data || typeof data !== "object") throw new ApiError(502, "invalid_response", "服务响应异常，请稍后重试。", requestId);

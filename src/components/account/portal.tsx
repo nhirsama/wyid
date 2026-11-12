@@ -4,9 +4,9 @@ import Image from "next/image";
 import { useEffect, useState } from "react";
 import { BookOpen, Browser, CaretRight, Gear, List, SignOut } from "@phosphor-icons/react";
 import { useBrand } from "@/components/auth/brand-provider";
-import { api, clearApiCache, post } from "@/lib/account/api";
+import { ApiError, clearApiCache, post, readApi } from "@/lib/account/api";
 import type { Account, PublicConfig } from "@/lib/account/types";
-import { AccountLink as Link, useAccountRouter } from "./navigation";
+import { AccountLink as Link, AccountNavigationProvider, useAccountRoute, useAccountRouter } from "./navigation";
 import { ApplicationsView } from "./applications-view";
 import { Avatar } from "./avatar";
 import { HelpView } from "./help-view";
@@ -20,31 +20,61 @@ const navigation = [
   { href: "/help", title: "接入帮助", icon: BookOpen },
 ];
 
-export function AccountPortal({ route, initialAccount, config }: { route: string; initialAccount: Account; config: PublicConfig }) {
+type PortalProps = { route: string; initialAccount: Account; config: PublicConfig };
+export function AccountPortal(props: PortalProps) {
+  return <AccountNavigationProvider route={props.route}><Portal initialAccount={props.initialAccount} config={props.config} /></AccountNavigationProvider>;
+}
+
+function Portal({ initialAccount, config }: Omit<PortalProps, "route">) {
+  const route = useAccountRoute();
   const brand = useBrand();
   const router = useAccountRouter();
   const [account, setAccount] = useState(initialAccount);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<{ message: string; loginRequired: boolean } | null>(null);
   const [menu, setMenu] = useState(false);
   const [signout, setSignout] = useState(false);
   const task = useTask();
   useEffect(() => {
-    clearApiCache();
     let active = true;
+    let pending = false;
+    // The initial profile was just validated by the server. Returning from a
+    // password manager or switching tabs must not evict all private read data.
+    let checkedAt = Date.now();
     const refresh = () => {
-      clearApiCache();
-      api<{ account: Account }>("/me").then(value => { if (active) { setAccount(value.account); setError(""); } }).catch(() => { if (active) setError("登录状态发生变化，请重新验证后继续。"); });
+      if (document.visibilityState === "hidden" || pending || Date.now() - checkedAt < 60_000) return;
+      pending = true;
+      checkedAt = Date.now();
+      readApi<{ account: Account }>("/me", true)
+        .then(value => {
+          if (!active) return;
+          if (value.account.id !== initialAccount.id) {
+            // Another tab changed accounts: discard this principal's shell and
+            // private data rather than mixing accounts during local navigation.
+            clearApiCache();
+            window.location.reload();
+            return;
+          }
+          setAccount(value.account); setError(null);
+        })
+        .catch(cause => {
+          if (!active) return;
+          const loginRequired = cause instanceof ApiError && (cause.status === 401 || cause.code === "authentication_incomplete");
+          if (loginRequired) clearApiCache();
+          setError({ loginRequired, message: loginRequired ? "登录状态发生变化，请重新验证后继续。" : "暂时无法刷新账号资料，请检查网络后稍后重试。" });
+        })
+        .finally(() => { pending = false; });
     };
     window.addEventListener("focus", refresh);
-    return () => { active = false; window.removeEventListener("focus", refresh); clearApiCache(); };
-  }, []);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { active = false; window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh); clearApiCache(); };
+  }, [initialAccount.id]);
   const selected = (href: string) => href === "/apps" ? route.startsWith("/apps") : href.startsWith("/settings") ? route.startsWith("/settings") : route === href;
   const section = route.startsWith("/settings") ? "账号设置" : route === "/help" ? "接入帮助" : "我的应用";
   const nav = <nav aria-label="主导航"><h2>账号门户</h2>{navigation.map(item => <Link key={item.href} href={item.href} className={selected(item.href) ? "selected" : ""} aria-current={selected(item.href) ? "page" : undefined} onClick={() => setMenu(false)}><item.icon size={19} />{item.title}</Link>)}</nav>;
   return <div className="account-ui"><div className="portal">
     <aside className="sidebar"><Link className="brand" href="/apps">{brand.icon && <Image src={brand.icon} width={32} height={36} unoptimized alt="" />}<div><strong>{brand.nickname}</strong><small>ACCOUNT PORTAL</small></div></Link>{nav}<div className="sidebar-user"><Avatar account={account} /><div><strong>{account.displayName}</strong><small>{account.email}</small></div><button className="icon-button" aria-label="退出登录" onClick={() => { task.clear(); setSignout(true); }}><SignOut size={19} /></button></div></aside>
     <div className="main"><header className="topbar"><div><button className="icon-button mobile-menu" aria-label="打开菜单" aria-expanded={menu} onClick={() => setMenu(true)}><List size={21} /></button><span>账号门户</span><CaretRight size={12} /><strong>{section}</strong></div><Link href="/help"><BookOpen size={16} />接入帮助</Link></header>
-      <main className="content" id="main-content">{error && <Notice kind="error">{error}<Link href="/account">继续身份验证</Link></Notice>}
+      <main className="content" id="main-content">{error && <Notice kind="error">{error.message}{error.loginRequired && <Link href="/account">继续身份验证</Link>}</Notice>}
         {route.startsWith("/settings") ? <SettingsView key={route} route={route} account={account} onAccount={setAccount} config={config} /> : route === "/help" ? <HelpView issuer={config.issuer} /> : <ApplicationsView key={route} route={route} issuer={config.issuer} />}
         <footer className="portal-footer"><span>{brand.nickname}</span><span>账号与单点登录</span></footer>
       </main>

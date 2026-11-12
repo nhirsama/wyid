@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { AccountPortal } from "@/components/account/portal";
 import { accountConfig, accountIdentity, accountProfile } from "@/server/account/identity";
 import { AccountError } from "@/server/account/errors";
-import { decodeAccountSegments } from "@/lib/account/routes";
+import { decodeAccountSegments, isAccountRoute } from "@/lib/account/routes";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -13,7 +13,7 @@ export default async function AccountPortalPage({ params }: { params: Promise<{ 
   let route: string;
   try { route = `/${decodeAccountSegments(path).join("/")}`; }
   catch { notFound(); }
-  if (!["/apps", "/apps/new", "/settings/profile", "/settings/security", "/settings/devices", "/help"].includes(route) && !/^\/apps\/[\w-]{1,200}:[\w-]{1,200}$/.test(route)) notFound();
+  if (!isAccountRoute(route)) notFound();
   let identity;
   try { identity = await accountIdentity(); }
   catch (error) {
