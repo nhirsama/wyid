@@ -43,9 +43,6 @@ h1, p { overflow-wrap: anywhere; }
 .auth-switch { margin: 10px 0 0; text-align: center; font-size: 14px; color: #94a2b7; }
 .auth-switch a { margin-left: 7px; color: #5b7fae; }
 .auth-switch a:hover { color: var(--pink); text-decoration: underline; text-underline-offset: 4px; }
-.back-link { display: inline-flex; align-items: center; gap: 8px; margin: -1px 0 22px; color: #7e91ae; font-size: 14px; }
-.back-link:hover { color: var(--blue-hover); }
-.back-link span { font-family: sans-serif; font-size: 17px; }
 
 .form, .form-fieldset { display: flex; flex-direction: column; gap: 19px; min-width: 0; }
 .form-fieldset { border: 0; padding: 0; margin: 0; }

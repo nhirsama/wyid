@@ -4,7 +4,12 @@ import { create } from "@bufbuild/protobuf";
 import { AuthRequestSchema, ErrorReason, Prompt } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
 import type { AuthContext } from "@/lib/auth";
 
-const mocks = vi.hoisted(() => ({ request: vi.fn(), organization: vi.fn(), policy: vi.fn(), applicationName: vi.fn(), deny: vi.fn(), form: vi.fn() }));
+const mocks = vi.hoisted(() => ({ request: vi.fn(), organization: vi.fn(), policy: vi.fn(), applicationName: vi.fn(), deny: vi.fn(), form: vi.fn(), session: vi.fn(), resume: vi.fn() }));
+vi.mock("@/server/session", () => ({ readAuthenticatedSession: mocks.session }));
+vi.mock("@/components/auth/resume-login-form", () => ({ ResumeLoginForm: (props: { context: AuthContext }) => {
+  mocks.resume(props);
+  return <div>resume-login</div>;
+} }));
 vi.mock("@/server/zitadel/service", () => ({ zitadel: {
   authRequest: mocks.request, organizationForAuth: mocks.organization, policy: mocks.policy,
   applicationName: mocks.applicationName, deny: mocks.deny,
@@ -53,5 +58,35 @@ describe("login presentation is independent of the authorization entry point", (
     await expect(LoginPage({ searchParams: Promise.resolve({ authRequest: "V2_test" }) })).rejects.toThrow("NEXT_REDIRECT:");
     expect(mocks.deny).toHaveBeenCalledWith("V2_test", ErrorReason.LOGIN_REQUIRED);
     expect(mocks.policy).not.toHaveBeenCalled();
+  });
+
+  it.each([{}, { authRequest: "V2_test" }])("continues an existing login through POST without exposing credentials for %j", async params => {
+    mocks.session.mockResolvedValue({ sessionId: "secret-id", sessionToken: "secret-token", userId: "user-id" });
+    const html = renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve(params) }));
+    expect(html).toContain("resume-login");
+    expect(html).not.toContain("login-form");
+    expect(html).not.toContain("secret-token");
+    expect(mocks.resume).toHaveBeenCalledWith({ context: expect.objectContaining({ authRequestId: params.authRequest }) });
+    expect(mocks.policy).not.toHaveBeenCalled();
+    expect(mocks.deny).not.toHaveBeenCalled();
+  });
+
+  it("does not immediately reject prompt=none when an existing session can be checked", async () => {
+    mocks.session.mockResolvedValue({ sessionId: "secret-id", sessionToken: "secret-token", userId: "user-id" });
+    mocks.request.mockResolvedValue(create(AuthRequestSchema, { id: "V2_test", prompt: [Prompt.NONE] }));
+    const html = renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve({ authRequest: "V2_test" }) }));
+    expect(html).toContain("resume-login");
+    expect(mocks.deny).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { prompt: [Prompt.LOGIN] }, { prompt: [Prompt.SELECT_ACCOUNT] }, { prompt: [Prompt.CREATE] }, { maxAge: { seconds: 0n } },
+  ])("keeps interactive login when requested by ZITADEL (case %#)", async overrides => {
+    mocks.session.mockResolvedValue({ sessionId: "secret-id", sessionToken: "secret-token", userId: "user-id" });
+    mocks.request.mockResolvedValue(create(AuthRequestSchema, { id: "V2_test", ...overrides }));
+    const html = renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve({ authRequest: "V2_test" }) }));
+    expect(html).toContain("login-form");
+    expect(html).not.toContain("resume-login");
+    expect(mocks.session).not.toHaveBeenCalled();
   });
 });

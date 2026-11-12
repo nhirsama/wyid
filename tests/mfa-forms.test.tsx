@@ -109,7 +109,7 @@ describe("login continuation forms", () => {
 
   it("changes a password with confirmation and the live policy hint", () => {
     const html = render(<LoginPasswordChangeForm context={context} policy={policy} />);
-    expect(html).toContain("至少 12 个字符 · 大写字母 · 小写字母 · 数字 · 特殊字符");
+    expect(html).toContain("密码至少 12 个字符，需包含大小写字母、数字和特殊字符。");
     expect(input(html, "password")).toContain('autoComplete="new-password"');
     expect(input(html, "confirmPassword")).toContain('type="password"');
     expect(html).toContain("更新密码并继续");

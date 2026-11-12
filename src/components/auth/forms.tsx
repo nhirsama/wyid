@@ -72,7 +72,7 @@ export function RegisterForm({ context, policy }: Props) {
       <fieldset disabled={action.pending} className="form-fieldset">
         <Field label="用户名" registration={form.register("username")} error={form.formState.errors.username?.message} autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="输入用户名" maxLength={100} />
         <Field label="邮箱" type="email" registration={form.register("email")} error={form.formState.errors.email?.message} autoComplete="email" placeholder="you@example.com" maxLength={320} />
-        <Field label="密码" type="password" registration={form.register("password")} error={form.formState.errors.password?.message} autoComplete="new-password" hint={`密码要求：${passwordHint(policy.passwordPolicy)}。`} maxLength={1024} />
+        <Field label="密码" type="password" registration={form.register("password")} error={form.formState.errors.password?.message} autoComplete="new-password" hint={`密码${passwordHint(policy.passwordPolicy)}。`} maxLength={1024} />
         <Field label="确认密码" type="password" registration={form.register("confirmPassword")} error={form.formState.errors.confirmPassword?.message} autoComplete="new-password" placeholder="再次输入密码" maxLength={1024} />
         <Submit pending={action.pending}>创建账号<ArrowRight size={16} aria-hidden="true" /></Submit>
       </fieldset>
@@ -106,7 +106,7 @@ export function ResetPasswordForm({ context, policy }: Props) {
       <Feedback result={action.result} />
       <fieldset disabled={action.pending} className="form-fieldset">
         <Field label="邮件验证码" registration={form.register("code")} error={form.formState.errors.code?.message} autoComplete="one-time-code" placeholder="输入邮件中的验证码" maxLength={256} />
-        <Field label="新密码" type="password" registration={form.register("password")} error={form.formState.errors.password?.message} autoComplete="new-password" hint={`密码要求：${passwordHint(policy.passwordPolicy)}。`} maxLength={1024} />
+        <Field label="新密码" type="password" registration={form.register("password")} error={form.formState.errors.password?.message} autoComplete="new-password" hint={`密码${passwordHint(policy.passwordPolicy)}。`} maxLength={1024} />
         <Field label="确认新密码" type="password" registration={form.register("confirmPassword")} error={form.formState.errors.confirmPassword?.message} autoComplete="new-password" placeholder="再次输入密码" maxLength={1024} />
         <Submit pending={action.pending} disabled={!context.userId}>保存新密码</Submit>
       </fieldset>

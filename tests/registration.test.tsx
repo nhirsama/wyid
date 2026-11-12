@@ -74,11 +74,13 @@ describe("registration follows the live ZITADEL policy", () => {
     const html = renderToStaticMarkup(page);
     expect(mocks.loginSettings).toHaveBeenCalledWith({ ctx: expect.objectContaining({ resourceOwner: { case: "orgId", value: "org-id" } }) });
     expect(html).toContain('href="/login?authRequest=V2_test"');
+    expect(html).not.toContain('class="back-link"');
+    expect(html).not.toContain("←");
     if (enabled) {
       expect(html).toContain('name="username"');
       expect(html).toContain('name="email"');
       expect(html).toContain('name="confirmPassword"');
-      expect(html).toContain("至少 12 个字符 · 数字");
+      expect(html).toContain("密码至少 12 个字符，需包含数字。");
       for (const name of ["givenName", "familyName", "nickName"]) expect(html).not.toContain(`name="${name}"`);
     } else {
       expect(html).toContain("当前未开放密码账号注册。");

@@ -3,7 +3,6 @@
 import Image from "next/image";
 import { useState, type ReactNode } from "react";
 import { useBrand } from "./brand-provider";
-import { AppLink } from "@/components/ui/app-link";
 import { useAuthActionFlow } from "./auth-action-provider";
 
 export function AuthShell({ children }: { children: ReactNode }) {
@@ -28,7 +27,6 @@ type AuthPanelProps = {
   title: string;
   description: ReactNode;
   children: ReactNode;
-  back?: string;
   reference?: boolean;
   className?: string;
 };
@@ -40,10 +38,9 @@ export function AuthPanel(props: AuthPanelProps) {
   // Cookie-triggered refreshes must not replace the submitted form with a
   // stale failure page before the action has returned its actual result.
   if (!busy && idleProps !== props) setIdleProps(props);
-  const { title, description, children, back, reference = false, className } = busy ? idleProps : props;
+  const { title, description, children, reference = false, className } = busy ? idleProps : props;
   return <section className={["auth-card", reference && "reference-auth-card", className].filter(Boolean).join(" ")} aria-labelledby="auth-title" aria-busy={busy}>
     <div className="auth-panel-content">
-    {back && <AppLink href={back} className="back-link"><span aria-hidden="true">←</span> 返回登录</AppLink>}
     <header className="auth-heading"><h1 id="auth-title">{title}</h1><p>{description}</p></header>
     {children}
     </div>

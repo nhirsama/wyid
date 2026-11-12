@@ -139,14 +139,16 @@ export const zitadel = {
       passwordReset: value.allowUsernamePassword && !value.hidePasswordReset, passkey: value.passkeysType === PasskeysType.ALLOWED,
       forceMfa: value.forceMfa, forceMfaLocalOnly: value.forceMfaLocalOnly, factors,
       userVerifiedKey: value.multiFactors.includes(MultiFactorType.U2F_WITH_VERIFICATION),
+      passwordLifetimeMs: durationMs(value.passwordCheckLifetime),
+      externalLoginLifetimeMs: durationMs(value.externalLoginCheckLifetime),
       secondFactorLifetimeMs: durationMs(value.secondFactorCheckLifetime),
       multiFactorLifetimeMs: durationMs(value.multiFactorCheckLifetime),
       passwordPolicy: { minLength: Number(p.minLength), uppercase: p.requiresUppercase, lowercase: p.requiresLowercase, number: p.requiresNumber, symbol: p.requiresSymbol },
       identityProviders: providers.map(provider => ({ id: provider.id, name: provider.name, creationAllowed: Boolean(provider.options?.isCreationAllowed), autoCreation: Boolean(provider.options?.isAutoCreation) })),
     };
   },
-  async createSession(checks: CheckInput, challenges?: ChallengeInput, lifetimeSeconds?: number) {
-    const result = await getClients().session.createSession(create(CreateSessionRequestSchema, { checks, challenges, lifetime: lifetimeSeconds ? { seconds: BigInt(lifetimeSeconds) } : undefined }));
+  async createSession(checks: CheckInput, challenges?: ChallengeInput) {
+    const result = await getClients().session.createSession(create(CreateSessionRequestSchema, { checks, challenges }));
     return { ...sessionRef(result), challenges: result.challenges };
   },
   async updateSession(session: SessionRef, checks?: CheckInput, challenges?: ChallengeInput) {

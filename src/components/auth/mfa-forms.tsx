@@ -328,7 +328,7 @@ export function LoginPasswordChangeForm({ context, policy }: ContextProps & { po
       <AuthenticationRecovery context={context} action={action} />
       <fieldset disabled={action.pending} className="form-fieldset">
         <Field label="新密码" type="password" registration={form.register("password")} error={form.formState.errors.password?.message}
-          autoComplete="new-password" hint={`密码要求：${passwordHint(policy.passwordPolicy)}。`} maxLength={1024} />
+          autoComplete="new-password" hint={`密码${passwordHint(policy.passwordPolicy)}。`} maxLength={1024} />
         <Field label="确认新密码" type="password" registration={form.register("confirmPassword")} error={form.formState.errors.confirmPassword?.message}
           autoComplete="new-password" placeholder="再次输入新密码" maxLength={1024} />
         <Submit pending={action.pending}>更新密码并继续<ArrowRight size={16} aria-hidden="true" /></Submit>

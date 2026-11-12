@@ -3,12 +3,13 @@ import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { SessionSchema, type Factors } from "@zitadel/proto/zitadel/session/v2/session_pb.js";
 import { UserSchema, type User } from "@zitadel/proto/zitadel/user/v2/user_pb.js";
+import { AuthRequestSchema, Prompt } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
 import type { Factor, LoginPolicy } from "@/lib/auth";
 
 const mocks = vi.hoisted(() => ({ session: vi.fn(), user: vi.fn(), policy: vi.fn(), methods: vi.fn() }));
 vi.mock("@/server/config", () => ({ getConfig: () => ({ organizationId: "default-org" }), ConfigurationError: class extends Error {} }));
 vi.mock("@/server/zitadel/service", () => ({ zitadel: mocks }));
-import { authenticationStep, inspectAuthentication } from "@/server/authentication";
+import { authenticationExpiresAt, authenticationStep, canReuseAuthentication, inspectAuthentication, type AuthenticationState } from "@/server/authentication";
 
 const now = new Date("2026-11-10T10:00:00.000Z");
 const at = (age = 0) => timestampFromDate(new Date(now.getTime() - age));
@@ -118,6 +119,70 @@ describe("native ZITADEL authentication gate", () => {
   it("rejects invalid negative lifetimes rather than turning off expiration", () => {
     expect(step({ totp: { verifiedAt: at() } as Factors["totp"] }, ["totp"], { secondFactorLifetimeMs: -1 }).step).toBe("mfa");
   });
+  it.each([
+    { passwordLifetimeMs: 10_000 }, { passwordLifetimeMs: -1 }, { passwordLifetimeMs: 0 },
+  ])("applies the live password lifetime to native primary proof: %j", overrides => {
+    expect(() => step({ password: { verifiedAt: at(10_001) } as Factors["password"] }, [], overrides)).toThrow("请先完成");
+  });
+  it("allows a zero-lifetime password only when it was checked during the current flow", () => {
+    const zero = { ...policy, passwordLifetimeMs: 0 };
+    expect(authenticationStep(native(), human(), zero, [], false, now.getTime() - 1).step).toBe("complete");
+    expect(() => authenticationStep(native(), human(), zero, [])).toThrow("请先完成");
+  });
+  it("expires external login proof independently of password and MFA policies", () => {
+    expect(() => step({ password: undefined, intent: { verifiedAt: at(10_001) } as Factors["intent"] }, [], { externalLoginLifetimeMs: 10_000 })).toThrow("请先完成");
+    expect(step({ password: undefined, intent: { verifiedAt: at(9_999) } as Factors["intent"] }, [], { externalLoginLifetimeMs: 10_000 }).step).toBe("complete");
+  });
+});
+
+describe("native proof reuse and persistence deadlines", () => {
+  function state(factors: Partial<Omit<Factors, "$typeName">> = {}, overrides: Partial<LoginPolicy> = {}): AuthenticationState {
+    return { step: "complete", session: native(factors), user: human(), userId: "user-id", policy: { ...policy, ...overrides }, methods: [], needsEnrollment: false };
+  }
+  it("uses the stricter of password lifetime and max_age, including protobuf nanos", () => {
+    const request = create(AuthRequestSchema, { maxAge: { seconds: 1n, nanos: 500_000_000 } });
+    expect(canReuseAuthentication(state({ password: { verifiedAt: at(1500) } as Factors["password"] }), request)).toBe(true);
+    expect(canReuseAuthentication(state({ password: { verifiedAt: at(1501) } as Factors["password"] }), request)).toBe(false);
+    expect(canReuseAuthentication(state({ password: { verifiedAt: at(1001) } as Factors["password"] }, { passwordLifetimeMs: 1000 }), request)).toBe(false);
+  });
+  it("checks external-login and user-verified passkey freshness independently", () => {
+    const external = { password: undefined, intent: { verifiedAt: at(1000) } as Factors["intent"] };
+    expect(canReuseAuthentication(state(external, { externalLoginLifetimeMs: 999 }))).toBe(false);
+    expect(canReuseAuthentication(state(external, { externalLoginLifetimeMs: 1001 }))).toBe(true);
+    const key = { password: undefined, webAuthN: { verifiedAt: at(1000), userVerified: true } as Factors["webAuthN"] };
+    expect(canReuseAuthentication(state(key, { multiFactorLifetimeMs: 999 }))).toBe(false);
+    expect(canReuseAuthentication(state(key, { multiFactorLifetimeMs: 1001 }))).toBe(true);
+    expect(canReuseAuthentication(state(key, { passkey: false }))).toBe(false);
+    expect(canReuseAuthentication(state({ password: undefined, webAuthN: { ...key.webAuthN, userVerified: false } as Factors["webAuthN"] }))).toBe(false);
+  });
+  it.each([Prompt.LOGIN, Prompt.SELECT_ACCOUNT, Prompt.CREATE])("honors prompt=%s without treating it as a cookie preference", prompt => {
+    expect(canReuseAuthentication(state(), create(AuthRequestSchema, { prompt: [prompt] }))).toBe(false);
+  });
+  it("does not force an account different from ZITADEL's hints", () => {
+    expect(canReuseAuthentication(state(), create(AuthRequestSchema, { hintUserId: "other-user" }))).toBe(false);
+    expect(canReuseAuthentication(state(), create(AuthRequestSchema, { loginHint: "someone-else@example.com" }))).toBe(false);
+    const same = state();
+    same.session.factors!.user!.loginName = "User@Example.com";
+    expect(canReuseAuthentication(same, create(AuthRequestSchema, { hintUserId: "user-id", loginHint: "user@example.com" }))).toBe(true);
+  });
+  it("requires new proof for zero lifetimes even when the cookie remembers a completed flow", () => {
+    expect(canReuseAuthentication(state({}, { passwordLifetimeMs: 0 }))).toBe(false);
+    expect(canReuseAuthentication(state(), create(AuthRequestSchema, { maxAge: {} }))).toBe(false);
+  });
+  it("limits persistence by absolute native expiration and primary policy, never a sliding local timeout", () => {
+    const current = state({ password: { verifiedAt: at(5000) } as Factors["password"] }, { passwordLifetimeMs: 60_000 });
+    expect(authenticationExpiresAt(current)).toBe(now.getTime() + 55_000);
+    current.session.expirationDate = at(-30_000);
+    expect(authenticationExpiresAt(current)).toBe(now.getTime() + 30_000);
+    vi.advanceTimersByTime(10_000);
+    expect(authenticationExpiresAt(current)).toBe(now.getTime() + 30_000);
+  });
+  it("does not turn an MFA deadline or missing native expiration into an invented persistence duration", () => {
+    expect(authenticationExpiresAt(state())).toBeUndefined();
+    expect(authenticationExpiresAt(state({}, { passwordLifetimeMs: 0 }))).toBeUndefined();
+    const passkey = state({ password: undefined, webAuthN: { verifiedAt: at(), userVerified: true } as Factors["webAuthN"] });
+    expect(authenticationExpiresAt(passkey)).toBeUndefined();
+  });
 });
 
 describe("shared account, consent and callback inspection", () => {
@@ -137,6 +202,11 @@ describe("shared account, consent and callback inspection", () => {
   });
   it("rejects a native user different from the cookie's expected user", async () => {
     await expect(inspectAuthentication(ref, "someone-else")).rejects.toThrow("登录账号已变化");
+    expect(mocks.user).not.toHaveBeenCalled();
+  });
+  it("rejects an expired native session even if the cookie and primary factor still look valid", async () => {
+    mocks.session.mockResolvedValue({ ...native(), expirationDate: at(1) });
+    await expect(inspectAuthentication(ref, "user-id")).rejects.toThrow("会话已失效");
     expect(mocks.user).not.toHaveBeenCalled();
   });
   it("rejects a user lookup that does not match the native session user", async () => {

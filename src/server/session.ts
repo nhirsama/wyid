@@ -15,7 +15,7 @@ const pendingSchema = z.object({
   idpIntentId: z.string().max(1024).optional(), idpIntentToken: z.string().max(2048).optional(), idpNewUser: z.record(z.string(), z.unknown()).optional(),
 });
 export type PendingSession = z.infer<typeof pendingSchema>;
-const authenticatedSchema = z.object({ mfaStartedAt: z.number().finite().nonnegative().optional(), sessionId: z.string().min(1).max(1024), sessionToken: z.string().min(1).max(2048), userId: z.string().min(1).max(1024) });
+const authenticatedSchema = z.object({ mfaStartedAt: z.number().finite().nonnegative().optional(), sessionId: z.string().min(1).max(1024), sessionToken: z.string().min(1).max(2048), userId: z.string().min(1).max(1024), expiresAt: z.number().finite().positive().optional() });
 export type AuthenticatedSession = z.infer<typeof authenticatedSchema>;
 
 function options() {
@@ -56,9 +56,18 @@ export async function clearPendingSession() {
 export async function writeAuthenticatedSession(input: AuthenticatedSession) {
   const { key, secure, issuer } = options();
   const payload = authenticatedSchema.parse(input);
-  const token = await new EncryptJWT(payload).setProtectedHeader({ alg: "dir", enc: "A256GCM" })
-    .setIssuer(issuer).setAudience("wyid:authenticated-session").setIssuedAt().setExpirationTime("12h").encrypt(key);
-  (await cookies()).set(secure ? "__Host-wyid-session" : "wyid-session", token, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: 43_200 });
+  const jwt = new EncryptJWT(payload).setProtectedHeader({ alg: "dir", enc: "A256GCM" })
+    .setIssuer(issuer).setAudience("wyid:authenticated-session").setIssuedAt();
+  // No local sliding timeout: the absolute deadline comes from ZITADEL's
+  // expiration_date and verified_at + login policy. Without one, use a browser
+  // session cookie; every account read and reuse still checks ZITADEL live.
+  if (payload.expiresAt !== undefined) {
+    if (payload.expiresAt <= Date.now()) throw new Error("Authenticated session has expired");
+    jwt.setExpirationTime(payload.expiresAt / 1000);
+  }
+  const token = await jwt.encrypt(key);
+  if (token.length > 3800) throw new Error("Authenticated session exceeds cookie size");
+  (await cookies()).set(secure ? "__Host-wyid-session" : "wyid-session", token, { httpOnly: true, secure, sameSite: "lax", path: "/", ...(payload.expiresAt === undefined ? {} : { expires: new Date(payload.expiresAt) }) });
 }
 
 export async function readAuthenticatedSession(): Promise<AuthenticatedSession | null> {
@@ -67,7 +76,8 @@ export async function readAuthenticatedSession(): Promise<AuthenticatedSession |
   if (!token) return null;
   try {
     const { payload } = await jwtDecrypt(token, key, { issuer, audience: "wyid:authenticated-session", keyManagementAlgorithms: ["dir"], contentEncryptionAlgorithms: ["A256GCM"] });
-    return authenticatedSchema.parse(payload);
+    const session = authenticatedSchema.parse(payload);
+    return session.expiresAt !== undefined && session.expiresAt <= Date.now() ? null : session;
   } catch { return null; }
 }
 

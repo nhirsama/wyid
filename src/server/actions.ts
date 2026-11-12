@@ -4,12 +4,12 @@ import { z } from "zod";
 import { randomBytes } from "node:crypto";
 import type { JsonObject } from "@bufbuild/protobuf";
 import { UserVerificationRequirement } from "@zitadel/proto/zitadel/session/v2/challenge_pb.js";
-import { authLink, canRegisterWithPassword, factorSchema, forgotPasswordSchema, loginSchema, loginNameSchema, passwordMeetsPolicy, registerSchema, resetPasswordSchema, verifyEmailSchema, verifyTotpSchema, type ActionResult, type AuthContext, type ChallengeResult, type Factor, type PasskeyChallengeResult } from "@/lib/auth";
+import { authLink, canRegisterWithPassword, factorSchema, forgotPasswordSchema, loginSchema, loginNameSchema, passwordHint, passwordMeetsPolicy, registerSchema, resetPasswordSchema, verifyEmailSchema, verifyTotpSchema, type ActionResult, type AuthContext, type ChallengeResult, type Factor, type PasskeyChallengeResult } from "@/lib/auth";
 import { AuthError, actionError } from "./errors";
 import { clearAuthenticatedSession, clearPendingSession, readAuthenticatedSession, readPendingSession, writeAuthenticatedSession, writePendingSession, type PendingSession } from "./session";
 import { getConfig } from "./config";
 import { zitadel, type SessionRef } from "./zitadel/service";
-import { inspectAuthentication, type AuthenticationState } from "./authentication";
+import { authenticationExpiresAt, canReuseAuthentication, inspectAuthentication, requiresFreshLogin, type AuthenticationState } from "./authentication";
 import { ErrorReason, Prompt } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
 import { redirect } from "next/navigation";
 import { consentToken, matchesConsentToken } from "./consent";
@@ -54,15 +54,29 @@ async function deferAuthentication(pending: PendingSession, state: Authenticatio
   await writePendingSession({ ...pending, userId: state.userId, methods: state.methods, needsEnrollment: state.needsEnrollment });
   return { ok: true, redirect: authLink("/verify", pending) };
 }
-async function callback(pending: PendingSession): Promise<ActionResult> {
+async function rememberAuthentication(pending: PendingSession, state: AuthenticationState) {
+  const expiresAt = authenticationExpiresAt(state);
+  // A successful upstream callback may finish right at the deadline. Do not
+  // turn an already consumed authorization into an error just to cache it.
+  if (expiresAt !== undefined && expiresAt <= Date.now()) return await clearAuthenticatedSession();
+  await writeAuthenticatedSession({ sessionId: pending.sessionId, sessionToken: pending.sessionToken, userId: state.userId, mfaStartedAt: pending.mfaStartedAt, expiresAt });
+}
+async function callback(pending: PendingSession, state: AuthenticationState): Promise<ActionResult> {
   if (!pending.authRequestId) throw new AuthError("登录会话缺少授权请求。");
   try {
     const url = await zitadel.callback(pending.authRequestId, { sessionId: pending.sessionId, sessionToken: pending.sessionToken });
+    await rememberAuthentication(pending, state);
     await clearPendingSession();
     return { ok: true, redirect: url };
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
     if (code !== 9) throw error;
+    const request = await zitadel.authRequest(pending.authRequestId);
+    if (request.prompt.includes(Prompt.NONE)) {
+      const url = await zitadel.deny(request.id, ErrorReason.INTERACTION_REQUIRED);
+      await clearPendingSession();
+      return { ok: true, redirect: url };
+    }
     // An application may impose stricter authentication than the instance policy.
     // This flag only adds a requirement; it is never evidence of completion.
     const stricter = { ...pending, requireMfa: true };
@@ -75,21 +89,22 @@ async function callback(pending: PendingSession): Promise<ActionResult> {
 async function finish(pending: PendingSession, state: AuthenticationState): Promise<ActionResult> {
   if (state.step !== "complete") return await deferAuthentication(pending, state);
   if (!pending.authRequestId) {
-    await writeAuthenticatedSession({ sessionId: pending.sessionId, sessionToken: pending.sessionToken, userId: state.userId, mfaStartedAt: pending.mfaStartedAt });
+    await rememberAuthentication(pending, state);
     await clearPendingSession();
     return { ok: true, redirect: "/account" };
   }
   const request = await zitadel.authRequest(pending.authRequestId);
-  if (request.prompt.includes(Prompt.NONE)) {
-    const url = await zitadel.deny(request.id, ErrorReason.CONSENT_REQUIRED);
-    await clearPendingSession();
-    return { ok: true, redirect: url };
-  }
   if (request.prompt.includes(Prompt.CONSENT) || !await zitadel.canSkipConsent(request.clientId)) {
+    if (request.prompt.includes(Prompt.NONE)) {
+      const url = await zitadel.deny(request.id, ErrorReason.CONSENT_REQUIRED);
+      await clearPendingSession();
+      return { ok: true, redirect: url };
+    }
+    await rememberAuthentication(pending, state);
     await writePendingSession({ ...pending, authRequestId: request.id, methods: [], userId: state.userId, needsEnrollment: false });
     return { ok: true, redirect: authLink("/consent", { authRequestId: request.id }) };
   }
-  return await callback(pending);
+  return await callback(pending, state);
 }
 async function finishOrFactor(pending: PendingSession): Promise<ActionResult> {
   pending = { ...pending, mfaStartedAt: pending.mfaStartedAt ?? Date.now() };
@@ -110,7 +125,7 @@ export async function decideConsent(raw: unknown): Promise<ActionResult> {
     }
     const state = await inspectPending(pending);
     if (state.step !== "complete") return await deferAuthentication(pending, state);
-    return await callback(pending);
+    return await callback(pending, state);
   } catch (error) { return actionError(error); }
 }
 type PrimaryLoginInput = { loginName: string; password: string; passkey?: false } | { passkey: true; loginName?: string; userId?: string; chooseAccount?: boolean };
@@ -148,8 +163,8 @@ async function beginLogin(input: PrimaryLoginInput, ctx: ReturnType<typeof conte
   let created: Awaited<ReturnType<typeof zitadel.createSession>>;
   try {
     created = input.passkey
-      ? await zitadel.createSession({ user: { search } }, { webAuthN: { domain: new URL(getConfig().appUrl).hostname, userVerificationRequirement: UserVerificationRequirement.REQUIRED } }, ctx.authRequestId ? 600 : undefined)
-      : await zitadel.createSession({ user: { search }, password: { password: input.password } }, undefined, ctx.authRequestId ? 600 : undefined);
+      ? await zitadel.createSession({ user: { search } }, { webAuthN: { domain: new URL(getConfig().appUrl).hostname, userVerificationRequirement: UserVerificationRequirement.REQUIRED } })
+      : await zitadel.createSession({ user: { search }, password: { password: input.password } });
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
     // Only a rejected password/account check is a credentials error, not a
@@ -343,6 +358,42 @@ export async function resumeAuthentication(rawContext: AuthContext): Promise<Act
     return await finishOrFactor(pending);
   } catch (error) { return actionError(error); }
 }
+/** POST-only continuation: rendering /login never writes cookies or consumes OIDC requests. */
+export async function resumeLogin(rawContext: AuthContext): Promise<ActionResult> {
+  try {
+    const ctx = context(rawContext);
+    const request = ctx.authRequestId ? await zitadel.authRequest(ctx.authRequestId) : undefined;
+    async function loginRequired(): Promise<ActionResult> {
+      await clearAuthenticatedSession();
+      return { ok: true, redirect: request?.prompt.includes(Prompt.NONE)
+        ? await zitadel.deny(request.id, ErrorReason.LOGIN_REQUIRED) : authLink("/login", ctx) };
+    }
+    const session = await readAuthenticatedSession();
+    if (!session || requiresFreshLogin(request)) return await loginRequired();
+    // Do not inherit the cookie's flow boundary when inspecting a new login.
+    const pending: PendingSession = { sessionId: session.sessionId, sessionToken: session.sessionToken, userId: session.userId, authRequestId: request?.id };
+    let state: AuthenticationState;
+    try { state = await inspectPending(pending); }
+    catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+      if (error instanceof AuthError || code === 5 || code === 16) return await loginRequired();
+      // A temporary service failure is not proof of expiry; retain the cookie
+      // for a retry, but never authorize without a successful live inspection.
+      throw error;
+    }
+    if (!canReuseAuthentication(state, request)) return await loginRequired();
+    const factors = state.session.factors;
+    const previousChecks = [factors?.webAuthN?.verifiedAt, factors?.totp?.verifiedAt, factors?.otpEmail?.verifiedAt, factors?.otpSms?.verifiedAt]
+      .flatMap(at => at ? [Number(at.seconds) * 1000 + at.nanos / 1_000_000] : []).filter(Number.isFinite);
+    // Strictly newer than existing proof, even in the same millisecond or with
+    // slight upstream clock skew. A zero lifetime always needs a new MFA check.
+    pending.mfaStartedAt = Math.max(Date.now(), ...previousChecks) + 1;
+    if (request?.prompt.includes(Prompt.NONE) && state.step !== "complete") {
+      return { ok: true, redirect: await zitadel.deny(request.id, ErrorReason.INTERACTION_REQUIRED) };
+    }
+    return await finish(pending, state);
+  } catch (error) { return actionError(error); }
+}
 export async function resumeAccountAuthentication() {
   const session = await readAuthenticatedSession();
   if (!session) redirectFromAction("/login");
@@ -390,7 +441,7 @@ export async function resetPassword(raw: unknown, rawContext: AuthContext): Prom
   } catch (error) { return actionError(error); }
 }
 function passwordPolicyMessage(policy: { minLength: number; uppercase: boolean; lowercase: boolean; number: boolean; symbol: boolean }) {
-  return `密码不符合要求：至少 ${policy.minLength} 个字符${policy.uppercase ? "，包含大写字母" : ""}${policy.lowercase ? "，包含小写字母" : ""}${policy.number ? "，包含数字" : ""}${policy.symbol ? "，包含特殊字符" : ""}。`;
+  return `密码不符合要求：${passwordHint(policy)}。`;
 }
 export async function verifyEmail(raw: unknown, rawContext: AuthContext): Promise<ActionResult> {
   try {
@@ -450,8 +501,9 @@ export async function completeIdentityProvider(raw: unknown): Promise<ActionResu
       return { ok: true, redirect: `/idp/confirm?state=${encodeURIComponent(input.state)}` };
     }
     if (!userId) throw new AuthError("此身份提供方尚未关联账号，且当前组织不允许自动创建账号。");
+    const mfaStartedAt = Date.now();
     const session = await zitadel.createSession({ user: { search: { case: "userId", value: userId } }, idpIntent: { idpIntentId: input.idpIntentId, idpIntentToken: input.idpIntentToken } });
-    return await finishOrFactor({ ...session, authRequestId: pending.authRequestId });
+    return await finishOrFactor({ ...session, authRequestId: pending.authRequestId, mfaStartedAt });
   } catch (error) { return actionError(error); }
 }
 export async function confirmIdentityProviderRegistration(raw: unknown): Promise<ActionResult> {
@@ -461,7 +513,8 @@ export async function confirmIdentityProviderRegistration(raw: unknown): Promise
     if (!pending || pending.idpState !== state || !pending.idpCreationAllowed || !pending.idpIntentId || !pending.idpIntentToken || !pending.idpNewUser) throw new AuthError("身份提供方注册请求已过期，请重新开始。");
     const user = await zitadel.registerIdpUser(pending.idpNewUser as never);
     if (!user.userId) throw new AuthError("创建账号失败，请重新检查身份提供方返回资料。");
+    const mfaStartedAt = Date.now();
     const session = await zitadel.createSession({ user: { search: { case: "userId", value: user.userId } }, idpIntent: { idpIntentId: pending.idpIntentId, idpIntentToken: pending.idpIntentToken } });
-    return await finishOrFactor({ ...session, authRequestId: pending.authRequestId });
+    return await finishOrFactor({ ...session, authRequestId: pending.authRequestId, mfaStartedAt });
   } catch (error) { return actionError(error); }
 }

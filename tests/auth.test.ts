@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authContext, authLink, loginSchema, passwordMeetsPolicy, registerSchema, resetPasswordSchema, verifyTotpSchema } from "@/lib/auth";
+import { authContext, authLink, loginSchema, passwordHint, passwordMeetsPolicy, registerSchema, resetPasswordSchema, verifyTotpSchema } from "@/lib/auth";
 import { consentScopes } from "@/lib/consent";
 const passwordPolicy = { minLength: 10, uppercase: true, lowercase: true, number: true, symbol: true };
 describe("form contracts", () => {
@@ -27,6 +27,32 @@ describe("form contracts", () => {
   });
   it("requires reset tokens and matching password confirmation", () => {
     expect(resetPasswordSchema.safeParse({ password: "new-pass", confirmPassword: "new-pass", code: "" }).success).toBe(false);
+  });
+});
+describe("password requirement wording", () => {
+  it.each([
+    [false, false, false, false, ""],
+    [true, false, false, false, "大写字母"],
+    [false, true, false, false, "小写字母"],
+    [false, false, true, false, "数字"],
+    [false, false, false, true, "特殊字符"],
+    [true, true, false, false, "大小写字母"],
+    [true, false, true, false, "大写字母和数字"],
+    [true, false, false, true, "大写字母和特殊字符"],
+    [false, true, true, false, "小写字母和数字"],
+    [false, true, false, true, "小写字母和特殊字符"],
+    [false, false, true, true, "数字和特殊字符"],
+    [true, true, true, false, "大小写字母和数字"],
+    [true, true, false, true, "大小写字母和特殊字符"],
+    [true, false, true, true, "大写字母、数字和特殊字符"],
+    [false, true, true, true, "小写字母、数字和特殊字符"],
+    [true, true, true, true, "大小写字母、数字和特殊字符"],
+  ] as const)("describes only enabled requirements (case %#)", (uppercase, lowercase, number, symbol, requirements) => {
+    for (const minLength of [8, 20]) {
+      expect(passwordHint({ minLength, uppercase, lowercase, number, symbol })).toBe(
+        `至少 ${minLength} 个字符${requirements ? `，需包含${requirements}` : ""}`,
+      );
+    }
   });
 });
 describe("authorization navigation", () => {

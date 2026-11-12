@@ -29,7 +29,7 @@ export type PasswordPolicy = { minLength: number; uppercase: boolean; lowercase:
 export type LoginPolicy = {
   password: boolean; registration: boolean; passwordReset: boolean; passkey: boolean;
   forceMfa: boolean; forceMfaLocalOnly: boolean; factors: Factor[]; userVerifiedKey: boolean;
-  secondFactorLifetimeMs?: number; multiFactorLifetimeMs?: number;
+  passwordLifetimeMs?: number; externalLoginLifetimeMs?: number; secondFactorLifetimeMs?: number; multiFactorLifetimeMs?: number;
   passwordPolicy: PasswordPolicy; identityProviders: { id: string; name: string; creationAllowed: boolean; autoCreation: boolean }[];
 };
 export function canRegisterWithPassword(policy: Pick<LoginPolicy, "registration" | "password">) {
@@ -56,7 +56,15 @@ export function authContext(params: SearchParams): AuthContext {
   };
 }
 export function passwordHint(policy: PasswordPolicy) {
-  return [`至少 ${policy.minLength} 个字符`, policy.uppercase && "大写字母", policy.lowercase && "小写字母", policy.number && "数字", policy.symbol && "特殊字符"].filter(Boolean).join(" · ");
+  const requirements = [
+    policy.uppercase && policy.lowercase ? "大小写字母" : policy.uppercase ? "大写字母" : policy.lowercase ? "小写字母" : "",
+    policy.number ? "数字" : "",
+    policy.symbol ? "特殊字符" : "",
+  ].filter(Boolean);
+  const characters = requirements.length > 1
+    ? `${requirements.slice(0, -1).join("、")}和${requirements.at(-1)}`
+    : requirements[0];
+  return `至少 ${policy.minLength} 个字符${requirements.length ? `，需包含${characters}` : ""}`;
 }
 export function passwordMeetsPolicy(password: string, policy: PasswordPolicy) {
   return [...password].length >= policy.minLength && (!policy.uppercase || /[A-Z]/.test(password)) &&

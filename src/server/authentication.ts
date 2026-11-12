@@ -1,4 +1,5 @@
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
+import { Prompt, type AuthRequest } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
 import { factorSchema, type Factor, type LoginPolicy } from "@/lib/auth";
 import { getConfig } from "./config";
 import { AuthError } from "./errors";
@@ -17,24 +18,28 @@ export type AuthenticationState = {
   needsEnrollment: boolean;
 };
 
+function timestampMs(value: Timestamp) {
+  return Number(value.seconds) * 1000 + value.nanos / 1_000_000;
+}
+
 /** Only ZITADEL's timestamped session checks are proof, never a cookie flag. */
 function checked(factor: { verifiedAt?: Timestamp } | undefined, lifetimeMs?: number, mfaStartedAt?: number) {
   if (!factor?.verifiedAt) return false;
   const now = Date.now();
-  const verifiedAt = Number(factor.verifiedAt.seconds) * 1000 + factor.verifiedAt.nanos / 1_000_000;
+  const verifiedAt = timestampMs(factor.verifiedAt);
   if (!Number.isFinite(verifiedAt) || verifiedAt > now + 5_000) return false;
   // A zero reuse window requires native proof from this login/step-up flow.
   // The encrypted flow boundary is only a lower bound, never proof by itself.
-  // Completed portal visits retain their flow; every new login creates a new
-  // Session and boundary, and re-entering step-up creates a fresh boundary.
+  // Completed portal visits retain their flow; a new login or reuse/step-up
+  // creates a fresh boundary, never inheriting a previous flow's completion.
   if (lifetimeMs === 0) return mfaStartedAt !== undefined && Number.isFinite(mfaStartedAt) && mfaStartedAt >= 0 && mfaStartedAt <= now && verifiedAt >= mfaStartedAt;
   return lifetimeMs === undefined || (Number.isFinite(lifetimeMs) && lifetimeMs >= 0 && now - verifiedAt <= lifetimeMs);
 }
 
 export function authenticationStep(session: Session, user: User, policy: LoginPolicy, enrolled: Factor[], requireMfa = false, mfaStartedAt?: number): Pick<AuthenticationState, "step" | "methods" | "needsEnrollment"> {
   const factors = session.factors;
-  const password = checked(factors?.password);
-  const external = checked(factors?.intent);
+  const password = checked(factors?.password, policy.passwordLifetimeMs, mfaStartedAt);
+  const external = checked(factors?.intent, policy.externalLoginLifetimeMs, mfaStartedAt);
   const verifiedKey = factors?.webAuthN?.userVerified === true && checked(factors.webAuthN, policy.multiFactorLifetimeMs, mfaStartedAt);
   if (!password && !external && !(policy.passkey && factors?.webAuthN?.userVerified === true && checked(factors.webAuthN))) throw new AuthError("请先完成密码、通行密钥或身份提供方验证。");
   if (user.type.case !== "human") throw new AuthError("此账号无法使用网页登录。");
@@ -58,9 +63,52 @@ export function authenticationStep(session: Session, user: User, policy: LoginPo
   return { step: "mfa", methods: methods.length ? methods : enrollmentMethods, needsEnrollment: methods.length === 0 };
 }
 
+export function requiresFreshLogin(request?: AuthRequest) {
+  return !!request && (request.prompt.some(prompt => [Prompt.LOGIN, Prompt.SELECT_ACCOUNT, Prompt.CREATE].includes(prompt)) ||
+    request.maxAge !== undefined && request.maxAge.seconds === 0n && request.maxAge.nanos === 0);
+}
+
+/** Reuse requires fresh native primary proof, not just an unexpired cookie. */
+export function canReuseAuthentication(state: AuthenticationState, request?: AuthRequest) {
+  if (requiresFreshLogin(request) || request?.hintUserId && request.hintUserId !== state.userId) return false;
+  if (request?.loginHint) {
+    const hint = request.loginHint.trim().toLowerCase();
+    const names = [state.session.factors?.user?.loginName, state.user.preferredLoginName, ...state.user.loginNames];
+    if (!names.some(name => name?.toLowerCase() === hint)) return false;
+  }
+  const factors = state.session.factors;
+  const maxAge = request?.maxAge;
+  const maxAgeMs = maxAge === undefined ? undefined : Number(maxAge.seconds) * 1000 + maxAge.nanos / 1_000_000;
+  const fresh = (factor: { verifiedAt?: Timestamp } | undefined, lifetime?: number) => checked(factor, lifetime) && checked(factor, maxAgeMs);
+  return fresh(factors?.password, state.policy.passwordLifetimeMs) || fresh(factors?.intent, state.policy.externalLoginLifetimeMs) ||
+    state.policy.passkey && factors?.webAuthN?.userVerified === true && fresh(factors.webAuthN, state.policy.multiFactorLifetimeMs);
+}
+
+/** Absolute cookie deadline. Reuse never extends native authentication times. */
+export function authenticationExpiresAt(state: AuthenticationState): number | undefined {
+  const { session, policy } = state;
+  const factors = session.factors;
+  const deadlines: number[] = [];
+  const primary = (factor: { verifiedAt?: Timestamp } | undefined, lifetime?: number) => {
+    if (!factor?.verifiedAt || !checked(factor)) return;
+    // Zero requires verification in each new flow, but must not immediately
+    // destroy the current completed flow or invent a persistence duration.
+    if (lifetime === undefined || lifetime === 0) deadlines.push(Infinity);
+    else if (Number.isFinite(lifetime) && lifetime > 0) deadlines.push(timestampMs(factor.verifiedAt) + lifetime);
+  };
+  primary(factors?.password, policy.passwordLifetimeMs);
+  primary(factors?.intent, policy.externalLoginLifetimeMs);
+  // MFA deadlines require step-up/re-authentication, not immediate deletion of
+  // the current completed login (which may have supplied a fresh second factor).
+  if (policy.passkey && factors?.webAuthN?.userVerified) primary(factors.webAuthN);
+  const expiresAt = Math.min(session.expirationDate ? timestampMs(session.expirationDate) : Infinity, deadlines.length ? Math.max(...deadlines) : Infinity);
+  return Number.isFinite(expiresAt) ? expiresAt : undefined;
+}
+
 /** Shared gate for direct login, OIDC consent/callback, and every account read. */
 export async function inspectAuthentication(ref: SessionRef & { mfaStartedAt?: number }, expectedUserId?: string, requireMfa = false): Promise<AuthenticationState> {
   const session = await zitadel.session(ref);
+  if (session.expirationDate && (!Number.isFinite(timestampMs(session.expirationDate)) || timestampMs(session.expirationDate) <= Date.now())) throw new AuthError("登录会话已失效，请重新登录。");
   const userId = session.factors?.user?.id;
   if (!userId || (expectedUserId && userId !== expectedUserId)) throw new AuthError("登录账号已变化或会话已失效，请重新登录。");
   const user = await zitadel.user(userId);

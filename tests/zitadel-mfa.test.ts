@@ -1,7 +1,7 @@
 import { create, toJson, type JsonObject, type MessageInitShape } from "@bufbuild/protobuf";
 import { DurationSchema } from "@bufbuild/protobuf/wkt";
 import { UserVerificationRequirement } from "@zitadel/proto/zitadel/session/v2/challenge_pb.js";
-import { SetSessionRequestSchema, SetSessionResponseSchema } from "@zitadel/proto/zitadel/session/v2/session_service_pb.js";
+import { CreateSessionResponseSchema, SetSessionRequestSchema, SetSessionResponseSchema } from "@zitadel/proto/zitadel/session/v2/session_service_pb.js";
 import { LoginSettingsSchema } from "@zitadel/proto/zitadel/settings/v2/login_settings_pb.js";
 import { GetLoginSettingsResponseSchema, GetPasswordComplexitySettingsResponseSchema } from "@zitadel/proto/zitadel/settings/v2/settings_service_pb.js";
 import { AuthFactorSchema, AuthFactorState, PasskeySchema } from "@zitadel/proto/zitadel/user/v2/user_pb.js";
@@ -33,7 +33,7 @@ const mocks = vi.hoisted(() => ({
     getLoginSettings: vi.fn<Clients["settings"]["getLoginSettings"]>(),
     getPasswordComplexitySettings: vi.fn<Clients["settings"]["getPasswordComplexitySettings"]>(),
   },
-  session: { setSession: vi.fn<Clients["session"]["setSession"]>() },
+  session: { setSession: vi.fn<Clients["session"]["setSession"]>(), createSession: vi.fn<Clients["session"]["createSession"]>() },
 }));
 vi.mock("@/server/config", () => ({ getConfig: () => ({ appUrl: "https://login.example.com:8443/auth", organizationId: "org-id" }) }));
 vi.mock("@/server/zitadel/sdk", () => ({ getClients: () => mocks }));
@@ -64,21 +64,31 @@ beforeEach(() => {
 describe("MFA policy SDK adaptation", () => {
   it("converts protobuf seconds and nanos to milliseconds without dropping fractions", async () => {
     loginSettings({
+      passwordCheckLifetime: create(DurationSchema, { seconds: 3600n, nanos: 500_000_000 }),
+      externalLoginCheckLifetime: create(DurationSchema, { seconds: 7200n, nanos: 250_000_000 }),
       secondFactorCheckLifetime: create(DurationSchema, { seconds: 30n, nanos: 250_000_000 }),
       multiFactorCheckLifetime: create(DurationSchema, { seconds: 0n, nanos: 500_000 }),
     });
-    expect(await zitadel.policy()).toMatchObject({ secondFactorLifetimeMs: 30_250, multiFactorLifetimeMs: 0.5 });
+    expect(await zitadel.policy()).toMatchObject({ passwordLifetimeMs: 3_600_500, externalLoginLifetimeMs: 7_200_250, secondFactorLifetimeMs: 30_250, multiFactorLifetimeMs: 0.5 });
   });
 
   it("preserves zero lifetimes instead of treating them as absent", async () => {
-    loginSettings({ secondFactorCheckLifetime: {}, multiFactorCheckLifetime: {} });
-    expect(await zitadel.policy()).toMatchObject({ secondFactorLifetimeMs: 0, multiFactorLifetimeMs: 0 });
+    loginSettings({ passwordCheckLifetime: {}, externalLoginCheckLifetime: {}, secondFactorCheckLifetime: {}, multiFactorCheckLifetime: {} });
+    expect(await zitadel.policy()).toMatchObject({ passwordLifetimeMs: 0, externalLoginLifetimeMs: 0, secondFactorLifetimeMs: 0, multiFactorLifetimeMs: 0 });
   });
 
   it("leaves missing lifetimes undefined", async () => {
     const policy = await zitadel.policy();
+    expect(policy.passwordLifetimeMs).toBeUndefined();
+    expect(policy.externalLoginLifetimeMs).toBeUndefined();
     expect(policy.secondFactorLifetimeMs).toBeUndefined();
     expect(policy.multiFactorLifetimeMs).toBeUndefined();
+  });
+
+  it("lets ZITADEL create the session without imposing a local ten-minute lifetime", async () => {
+    mocks.session.createSession.mockResolvedValue(create(CreateSessionResponseSchema, { sessionId: "session-id", sessionToken: "token" }));
+    await expect(zitadel.createSession({ user: { search: { case: "loginName", value: "user@example.com" } }, password: { password: "password" } })).resolves.toMatchObject({ sessionId: "session-id", sessionToken: "token" });
+    expect(mocks.session.createSession.mock.calls[0][0].lifetime).toBeUndefined();
   });
 });
 

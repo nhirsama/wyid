@@ -9,6 +9,9 @@ import { redirect } from "next/navigation";
 import { getBrand } from "@/server/brand";
 import { actionError } from "@/server/errors";
 import { AppLink } from "@/components/ui/app-link";
+import { ResumeLoginForm } from "@/components/auth/resume-login-form";
+import { readAuthenticatedSession } from "@/server/session";
+import { requiresFreshLogin } from "@/server/authentication";
 
 export const metadata = { title: "登录" };
 export default async function LoginPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -19,12 +22,16 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   let request: Awaited<ReturnType<typeof zitadel.authRequest>> | undefined;
   let policy: LoginPolicy | undefined;
   let callbackUrl: string | undefined;
+  let reuse = false;
   let failure: ReturnType<typeof actionError> | undefined;
   try {
     request = context.authRequestId ? await zitadel.authRequest(context.authRequestId) : undefined;
-    if (request?.prompt.includes(Prompt.NONE)) {
+    // Only expose flow context to the client, never the encrypted Session
+    // credential. The POST action rechecks all live ZITADEL requirements.
+    reuse = !requiresFreshLogin(request) && !!await readAuthenticatedSession();
+    if (!reuse && request?.prompt.includes(Prompt.NONE)) {
       callbackUrl = await zitadel.deny(request.id, ErrorReason.LOGIN_REQUIRED);
-    } else {
+    } else if (!reuse) {
       // Reuse the verified request. A second lookup adds latency and can expire
       // between reads, even though the page already has the organization scope.
       policy = await zitadel.policy(await zitadel.organizationForAuth(request));
@@ -34,6 +41,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   }
   // Next redirects are control flow, not upstream errors.
   if (callbackUrl) redirect(callbackUrl);
+  if (reuse) return <AuthPanel {...panel}><ResumeLoginForm context={context} /></AuthPanel>;
   if (!policy) return <AuthPanel {...panel}>
     <Notice kind="error">{failure?.message || "暂时无法读取登录方式，请重新加载。"}</Notice>
     <div className="result-stack">

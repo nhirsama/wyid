@@ -46,3 +46,11 @@ docker run -d \
 ## 3. 免确认项目配置
 
 将需要免授权确认的 ZITADEL Project ID 填入 `ZITADEL_SKIP_CONSENT_PROJECT_IDS`，多个 ID 用逗号分隔。保存环境变量后重启容器生效。
+
+## 4. 登录状态复用
+
+直接登录或应用授权完成身份验证后，站点会通过加密、HttpOnly Cookie 保存 ZITADEL Session 凭据。后续授权复用该会话，无需重复输入账号密码；每次仍向 ZITADEL 查询实际会话、账号所属组织的最新登录策略和验证方式，不把 Cookie 本身当作验证通过的依据。
+
+登录状态有效期取自 ZITADEL Session 的 `expiration_date`，以及原生验证时间加 `password_check_lifetime` / `external_login_check_lifetime` 得出的截止时间，不再固定为本地 12 小时，也不在重复授权时自动续期。没有可用截止时间时使用浏览器会话 Cookie。MFA 有效期仍读取 `second_factor_check_lifetime` / `multi_factor_check_lifetime`；过期时按当前策略补充验证，零有效期不复用上次授权的验证结果。会话失效或被撤销后需要重新登录，退出登录会撤销对应 ZITADEL Session。
+
+应用请求 `prompt=login`、`prompt=select_account` 或 `max_age=0` 时不自动复用账号；其他 `max_age` 值限制可复用的原生身份验证时间。登录状态复用不改变上面的免确认项目规则，也不会跳过显式的 `prompt=consent`。`prompt=none` 仅在已有有效登录且无需交互或授权确认时静默完成，否则返回相应 OIDC 错误。

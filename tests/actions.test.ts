@@ -1,5 +1,5 @@
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
-import { AuthRequestSchema, Prompt } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
+import { AuthRequestSchema, ErrorReason, Prompt } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
 import { UserVerificationRequirement } from "@zitadel/proto/zitadel/session/v2/challenge_pb.js";
 import { FactorsSchema, SessionSchema } from "@zitadel/proto/zitadel/session/v2/session_pb.js";
 import { HumanUserSchema, UserSchema } from "@zitadel/proto/zitadel/user/v2/user_pb.js";
@@ -37,7 +37,7 @@ vi.mock("@/server/zitadel/service", () => ({ zitadel: {
 import {
   beginFactor, changeLoginPassword, chooseIdentityProvider, completeIdentityProvider, confirmIdentityProviderRegistration, decideConsent,
   enrollOtpFactor, finishPasskey, finishTotpEnrollment, finishWebAuthnFactor, login, register,
-  requestPasswordReset, resendLoginEmail, resetPassword, resumeAccountAuthentication, resumeAuthentication,
+  logout, requestPasswordReset, resendLoginEmail, resetPassword, resumeAccountAuthentication, resumeAuthentication, resumeLogin,
   setEnrollmentPhone, startPasskey, startTotpEnrollment, verifyEmail, verifyEnrollmentPhone, verifyFactor, verifyLoginEmail,
 } from "@/server/actions";
 import { consentToken } from "@/server/consent";
@@ -118,6 +118,193 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
+describe("reuse of live ZITADEL login sessions", () => {
+  const remembered = { sessionId: "session-id", sessionToken: "remembered-token", userId: "user-id", mfaStartedAt: 1 };
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mocks.readAuthenticatedSession.mockResolvedValue(remembered);
+    mocks.session.mockResolvedValue(nativeSession());
+  });
+
+  it("reuses the native session for another authorization without checking a password or creating a session", async () => {
+    expect(await resumeLogin(context)).toEqual({ ok: true, redirect: "https://app.example.com/callback?code=opaque" });
+    expect(mocks.session).toHaveBeenCalledWith(expect.objectContaining({ sessionId: remembered.sessionId, sessionToken: remembered.sessionToken }));
+    expect(mocks.user).toHaveBeenCalledWith("user-id");
+    expect(mocks.policy).toHaveBeenCalledWith("org-id");
+    expect(mocks.methods).toHaveBeenCalledWith("user-id");
+    expect(mocks.createSession).not.toHaveBeenCalled();
+    expect(mocks.callback).toHaveBeenCalledWith("V2_test", { sessionId: remembered.sessionId, sessionToken: remembered.sessionToken });
+    expect(mocks.writeAuthenticatedSession).toHaveBeenCalledWith(expect.objectContaining({ sessionToken: remembered.sessionToken, userId: "user-id" }));
+  });
+
+  it("also reuses a completed login to open the account portal", async () => {
+    expect(await resumeLogin({})).toEqual({ ok: true, redirect: "/account" });
+    expect(mocks.callback).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("remembers an OIDC login after callback and uses it for a subsequent request", async () => {
+    expect((await login(credentials, context)).ok).toBe(true);
+    const saved = mocks.writeAuthenticatedSession.mock.calls[0][0];
+    mocks.readAuthenticatedSession.mockResolvedValue(saved);
+    mocks.authRequest.mockResolvedValue({ ...authorization, id: "V2_next" });
+    expect((await resumeLogin({ authRequestId: "V2_next" })).ok).toBe(true);
+    expect(mocks.createSession).toHaveBeenCalledTimes(1);
+    expect(mocks.callback).toHaveBeenLastCalledWith("V2_next", { sessionId: saved.sessionId, sessionToken: saved.sessionToken });
+  });
+
+  it.each([{ prompt: [] }, { prompt: [Prompt.CONSENT] }])("retains the original consent requirements for %j", async ({ prompt }) => {
+    mocks.authRequest.mockResolvedValue({ ...authorization, prompt });
+    mocks.canSkipConsent.mockResolvedValue(false);
+    expect(await resumeLogin(context)).toEqual({ ok: true, redirect: "/consent?authRequest=V2_test" });
+    expect(mocks.writePendingSession).toHaveBeenCalledWith(expect.objectContaining({ authRequestId: "V2_test", userId: "user-id", sessionToken: remembered.sessionToken }));
+    expect(mocks.writeAuthenticatedSession).toHaveBeenCalled();
+    expect(mocks.callback).not.toHaveBeenCalled();
+  });
+
+  it("honors prompt=consent even for an exempt project", async () => {
+    mocks.authRequest.mockResolvedValue({ ...authorization, prompt: [Prompt.CONSENT] });
+    expect(await resumeLogin(context)).toEqual({ ok: true, redirect: "/consent?authRequest=V2_test" });
+    expect(mocks.canSkipConsent).not.toHaveBeenCalled();
+    expect(mocks.callback).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { prompt: [Prompt.LOGIN] }, { prompt: [Prompt.SELECT_ACCOUNT] }, { maxAge: { seconds: 0n, nanos: 0 } },
+  ])("never reuses a session when a fresh login is requested (case %#)", async overrides => {
+    mocks.authRequest.mockResolvedValue({ ...authorization, ...overrides });
+    expect(await resumeLogin(context)).toEqual({ ok: true, redirect: "/login?authRequest=V2_test" });
+    expect(mocks.clearAuthenticatedSession).toHaveBeenCalled();
+    expect(mocks.session).not.toHaveBeenCalled();
+    expectNoAuthentication();
+  });
+
+  it.each(["password policy", "max_age"])("requires login again after the %s deadline", async reason => {
+    mocks.session.mockResolvedValue(nativeSession({ password: { verifiedAt: verifiedAt(-60_001) } }));
+    if (reason === "password policy") mocks.policy.mockResolvedValue({ ...policy, passwordLifetimeMs: 60_000 });
+    else mocks.authRequest.mockResolvedValue({ ...authorization, maxAge: { seconds: 60n, nanos: 0 } });
+    expect(await resumeLogin(context)).toEqual({ ok: true, redirect: "/login?authRequest=V2_test" });
+    expect(mocks.clearAuthenticatedSession).toHaveBeenCalled();
+    expectNoAuthentication();
+  });
+
+  it.each(["expired", "revoked", "account changed", "no primary proof"])("does not reuse a session that is %s", async reason => {
+    if (reason === "expired") mocks.session.mockResolvedValue({ ...nativeSession(), expirationDate: verifiedAt(-1) });
+    if (reason === "revoked") mocks.session.mockRejectedValue({ code: 5 });
+    if (reason === "account changed") mocks.session.mockResolvedValue(nativeSession({}, "different-user"));
+    if (reason === "no primary proof") mocks.session.mockResolvedValue(nativeSession({ password: undefined }));
+    expect(await resumeLogin(context)).toEqual({ ok: true, redirect: "/login?authRequest=V2_test" });
+    expect(mocks.clearAuthenticatedSession).toHaveBeenCalled();
+    expectNoAuthentication();
+  });
+
+  it("does not convert a temporary ZITADEL outage into authentication or discard the stored credential", async () => {
+    mocks.session.mockRejectedValue({ code: 14 });
+    expect((await resumeLogin(context)).ok).toBe(false);
+    expect(mocks.clearAuthenticatedSession).not.toHaveBeenCalled();
+    expectNoAuthentication();
+  });
+
+  it("requests only the expired second factor without creating another password session", async () => {
+    mocks.policy.mockResolvedValue({ ...policy, passwordLifetimeMs: 60_000, secondFactorLifetimeMs: 10_000 });
+    mocks.methods.mockResolvedValue(["totp"]);
+    mocks.session.mockResolvedValue(nativeSession({ password: { verifiedAt: verifiedAt(-20_000) }, totp: { verifiedAt: verifiedAt(-10_001) } }));
+    expect(await resumeLogin(context)).toEqual({ ok: true, redirect: "/verify?authRequest=V2_test" });
+    expect(mocks.writePendingSession).toHaveBeenLastCalledWith(expect.objectContaining({ methods: ["totp"], userId: "user-id", sessionToken: remembered.sessionToken }));
+    expect(mocks.createSession).not.toHaveBeenCalled();
+    expectNoAuthentication();
+  });
+
+  it.each([0, 3_000])("requires new native proof for zero-lifetime MFA even with an old check %s ms ahead", async ahead => {
+    const current = mockPendingSession(pendingSession());
+    mocks.policy.mockResolvedValue({ ...policy, secondFactorLifetimeMs: 0 });
+    mocks.methods.mockResolvedValue(["totp"]);
+    mocks.session.mockResolvedValue(nativeSession({ totp: { verifiedAt: verifiedAt(ahead) } }));
+    const oldProofAt = Date.now() + ahead;
+    expect(await resumeLogin(context)).toEqual({ ok: true, redirect: "/verify?authRequest=V2_test" });
+    expect(current()?.mfaStartedAt).toBeGreaterThan(oldProofAt);
+    vi.advanceTimersByTime(ahead + 10);
+    expect(await resumeAuthentication(context)).toEqual({ ok: true, redirect: "/verify?authRequest=V2_test" });
+    expectNoAuthentication();
+    mocks.session.mockImplementation(async ({ sessionToken }: { sessionToken: string }) => nativeSession({ totp: { verifiedAt: sessionToken === "new-token" ? verifiedAt() : verifiedAt(-10) } }));
+    expect(await verifyFactor({ method: "totp", code: "123456" }, context)).toEqual({ ok: true, redirect: "https://app.example.com/callback?code=opaque" });
+    expect(mocks.writeAuthenticatedSession).toHaveBeenCalledWith(expect.objectContaining({ sessionToken: "new-token" }));
+  });
+
+  it("completes prompt=none silently only for an authenticated session and an exempt project", async () => {
+    mocks.authRequest.mockResolvedValue({ ...authorization, prompt: [Prompt.NONE] });
+    expect(await resumeLogin(context)).toEqual({ ok: true, redirect: "https://app.example.com/callback?code=opaque" });
+    expect(mocks.deny).not.toHaveBeenCalled();
+    expect(mocks.writePendingSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["no session", ErrorReason.LOGIN_REQUIRED], ["consent needed", ErrorReason.CONSENT_REQUIRED],
+    ["MFA needed", ErrorReason.INTERACTION_REQUIRED], ["application step-up", ErrorReason.INTERACTION_REQUIRED],
+  ] as const)("returns the protocol error instead of an interactive page for silent auth with %s", async (reason, expected) => {
+    mocks.authRequest.mockResolvedValue({ ...authorization, prompt: [Prompt.NONE] });
+    mocks.deny.mockResolvedValue("https://app.example.com/callback?error=required");
+    if (reason === "no session") mocks.readAuthenticatedSession.mockResolvedValue(null);
+    if (reason === "consent needed") mocks.canSkipConsent.mockResolvedValue(false);
+    if (reason === "MFA needed") mocks.methods.mockResolvedValue(["totp"]);
+    if (reason === "application step-up") mocks.callback.mockRejectedValue({ code: 9 });
+    expect(await resumeLogin(context)).toEqual({ ok: true, redirect: "https://app.example.com/callback?error=required" });
+    expect(mocks.deny).toHaveBeenCalledWith("V2_test", expected);
+    expect(mocks.writePendingSession).not.toHaveBeenCalled();
+  });
+
+  it("uses absolute native deadlines and does not extend them during reuse", async () => {
+    const start = Date.now();
+    mocks.policy.mockResolvedValue({ ...policy, passwordLifetimeMs: 60_000 });
+    const session = { ...nativeSession(), expirationDate: verifiedAt(45_000) };
+    mocks.session.mockResolvedValue(session);
+    await resumeLogin({});
+    expect(mocks.writeAuthenticatedSession).toHaveBeenLastCalledWith(expect.objectContaining({ expiresAt: start + 45_000 }));
+    vi.advanceTimersByTime(10_000);
+    await resumeLogin({});
+    expect(mocks.writeAuthenticatedSession).toHaveBeenLastCalledWith(expect.objectContaining({ expiresAt: start + 45_000 }));
+  });
+
+  it("does not fail an already consumed callback if the cache deadline passes while calling ZITADEL", async () => {
+    mocks.policy.mockResolvedValue({ ...policy, passwordLifetimeMs: 1000 });
+    mocks.callback.mockImplementation(async () => {
+      vi.advanceTimersByTime(1001);
+      return "https://app.example.com/callback?code=opaque";
+    });
+    expect(await resumeLogin(context)).toEqual({ ok: true, redirect: "https://app.example.com/callback?code=opaque" });
+    expect(mocks.writeAuthenticatedSession).not.toHaveBeenCalled();
+    expect(mocks.clearAuthenticatedSession).toHaveBeenCalled();
+  });
+
+  it.each(["callback", "registration confirmation"])("starts the IDP flow before the native check with a zero external-login lifetime during %s", async entry => {
+    const state = "a137fc65-3e87-4da0-b5cd-936eb5972868";
+    const boundary = Date.now();
+    mockPendingSession(pendingSession({ authRequestId: undefined, idpState: state, idpCreationAllowed: true, idpIntentId: "intent-id", idpIntentToken: "intent-token", idpNewUser: { username: "new-user" } }));
+    mocks.policy.mockResolvedValue({ ...policy, externalLoginLifetimeMs: 0 });
+    mocks.retrieveIdp.mockResolvedValue({ userId: "user-id" });
+    mocks.registerIdpUser.mockResolvedValue({ userId: "user-id" });
+    mocks.createSession.mockImplementation(async () => {
+      vi.advanceTimersByTime(250);
+      const session = nativeSession({ password: undefined, intent: { verifiedAt: verifiedAt() } });
+      mocks.session.mockResolvedValue(session);
+      vi.advanceTimersByTime(250);
+      return { sessionId: "session-id", sessionToken: "idp-token" };
+    });
+    const result = entry === "callback"
+      ? await completeIdentityProvider({ state, idpIntentId: "intent-id", idpIntentToken: "intent-token" })
+      : await confirmIdentityProviderRegistration({ state });
+    expect(result).toEqual({ ok: true, redirect: "/account" });
+    expect(mocks.writeAuthenticatedSession).toHaveBeenLastCalledWith(expect.objectContaining({ sessionToken: "idp-token", mfaStartedAt: boundary }));
+  });
+
+  it("revokes the upstream remembered session and clears both local cookies on logout", async () => {
+    await expect(logout()).rejects.toThrow("NEXT_REDIRECT:/login");
+    expect(mocks.deleteSession).toHaveBeenCalledWith(remembered);
+    expect(mocks.clearAuthenticatedSession).toHaveBeenCalled();
+    expect(mocks.clearPendingSession).toHaveBeenCalled();
+  });
+});
+
 describe("ZITADEL server actions", () => {
   it("allows direct account login without an OIDC authorization request", async () => {
     const result = await login(credentials, {});
@@ -140,7 +327,7 @@ describe("ZITADEL server actions", () => {
     expect((await login({ ...credentials, password: "" }, context)).ok).toBe(false);
     expect(mocks.createSession).not.toHaveBeenCalled();
     expect((await login(credentials, context)).ok).toBe(true);
-    expect(mocks.createSession).toHaveBeenCalledWith({ user: { search: { case: "loginName", value: credentials.loginName } }, password: { password: credentials.password } }, undefined, 600);
+    expect(mocks.createSession).toHaveBeenCalledWith({ user: { search: { case: "loginName", value: credentials.loginName } }, password: { password: credentials.password } });
     expect(mocks.callback).toHaveBeenCalledWith("V2_test", { sessionId: "session-id", sessionToken: "session-token" });
   });
   it.each([5, 16])("reports an account/password error only after the credential check rejects with code %s", async code => {
@@ -259,7 +446,7 @@ describe("ZITADEL server actions", () => {
   });
   it("validates the current password complexity policy before creating an account", async () => {
     mocks.policy.mockResolvedValue({ ...policy, passwordPolicy: { ...policy.passwordPolicy, minLength: 20 } });
-    expect(await register(registration, context)).toEqual({ ok: false, message: expect.stringContaining("至少 20 个字符") });
+    expect(await register(registration, context)).toEqual({ ok: false, message: "密码不符合要求：至少 20 个字符，需包含小写字母。" });
     expect(mocks.register).not.toHaveBeenCalled();
   });
   it("starts an enabled identity provider using a server-generated state", async () => {
@@ -477,7 +664,7 @@ describe("primary passkey and MFA key ceremonies", () => {
     expect(await startPasskey({ userId: "user-id" }, context)).toEqual({ ok: true, options: { challenge: "native-challenge" } });
     expect(mocks.createSession).toHaveBeenCalledWith(
       { user: { search: { case: "userId", value: "user-id" } } },
-      { webAuthN: { domain: "login.example.com", userVerificationRequirement: UserVerificationRequirement.REQUIRED } }, 600,
+      { webAuthN: { domain: "login.example.com", userVerificationRequirement: UserVerificationRequirement.REQUIRED } },
     );
     expect(mocks.verifyWebAuthn).not.toHaveBeenCalled();
     expect(mocks.writePasskeyAccount).not.toHaveBeenCalled();
@@ -489,7 +676,7 @@ describe("primary passkey and MFA key ceremonies", () => {
     mocks.createSession.mockResolvedValue({ sessionId: "session-id", sessionToken: "passkey-token", challenges: { webAuthN: { publicKeyCredentialRequestOptions: { challenge: "native-challenge" } } } });
     expect(await startPasskey({}, {})).toEqual({ ok: true, options: { challenge: "native-challenge" } });
     expect(mocks.createSession).toHaveBeenCalledWith(
-      { user: { search: { case: "userId", value: "user-id" } } }, expect.anything(), undefined,
+      { user: { search: { case: "userId", value: "user-id" } } }, expect.anything(),
     );
     expectNoAuthentication();
   });
@@ -507,7 +694,7 @@ describe("primary passkey and MFA key ceremonies", () => {
     mocks.createSession.mockResolvedValue({ sessionId: "session-id", sessionToken: "passkey-token", challenges: { webAuthN: { publicKeyCredentialRequestOptions: { challenge: "native-challenge" } } } });
     expect(await startPasskey({}, context)).toEqual({ ok: true, options: { challenge: "native-challenge" } });
     expect(mocks.createSession).toHaveBeenCalledWith(
-      { user: { search: { case: "loginName", value: credentials.loginName } } }, expect.anything(), 600,
+      { user: { search: { case: "loginName", value: credentials.loginName } } }, expect.anything(),
     );
   });
 
@@ -522,15 +709,15 @@ describe("primary passkey and MFA key ceremonies", () => {
   });
 
   it.each([
-    { name: "direct", ctx: {} as AuthContext, lifetime: undefined },
-    { name: "OIDC", ctx: context, lifetime: 600 },
-  ])("requires user verification for a $name primary passkey challenge", async ({ ctx, lifetime }) => {
+    { name: "direct", ctx: {} as AuthContext },
+    { name: "OIDC", ctx: context },
+  ])("requires user verification without imposing a local session lifetime for a $name primary passkey challenge", async ({ ctx }) => {
     const options = { challenge: "primary-challenge" };
     mocks.createSession.mockResolvedValue({ sessionId: "session-id", sessionToken: "passkey-token", challenges: { webAuthN: { publicKeyCredentialRequestOptions: options } } });
     expect(await startPasskey({ loginName: credentials.loginName }, ctx)).toEqual({ ok: true, options });
     expect(mocks.createSession).toHaveBeenCalledWith(
       { user: { search: { case: "loginName", value: credentials.loginName } } },
-      { webAuthN: { domain: "login.example.com", userVerificationRequirement: UserVerificationRequirement.REQUIRED } }, lifetime,
+      { webAuthN: { domain: "login.example.com", userVerificationRequirement: UserVerificationRequirement.REQUIRED } },
     );
     expect(mocks.writePendingSession).toHaveBeenCalledWith(expect.objectContaining({ sessionToken: "passkey-token", passkeyPending: true }));
     expect(mocks.session).not.toHaveBeenCalled();
