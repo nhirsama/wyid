@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ConfigurationError, getConfig, zitadelRequestHeaders } from "@/server/config";
+import { ConfigurationError, getAppUrl, getConfig, zitadelRequestHeaders } from "@/server/config";
 
 let tempDirectory: string | undefined;
 beforeEach(() => {
@@ -17,6 +17,17 @@ afterEach(() => {
   tempDirectory = undefined;
 });
 describe("server configuration", () => {
+  it("resolves the navigation origin without requiring upstream credentials", () => {
+    vi.stubEnv("APP_URL", "https://login.example.com/");
+    vi.stubEnv("ZITADEL_API_URL", "");
+    vi.stubEnv("ZITADEL_SERVICE_TOKEN", "");
+    vi.stubEnv("SESSION_SECRET", "");
+    expect(getAppUrl()).toBe("https://login.example.com");
+    for (const value of ["", "https://login.example.com/path", "https://user:password@login.example.com", "//other.example.com"]) {
+      vi.stubEnv("APP_URL", value);
+      expect(() => getAppUrl()).toThrow("APP_URL");
+    }
+  });
   it("keeps API credentials in server-only configuration", () => {
     expect(getConfig().apiUrl).toBe("https://id.example.com");
     expect(JSON.stringify(getConfig())).toContain("server-secret-token");

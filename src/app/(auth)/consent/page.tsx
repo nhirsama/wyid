@@ -8,6 +8,7 @@ import { authContext, authLink } from "@/lib/auth";
 import { inspectAuthentication, type AuthenticationState } from "@/server/authentication";
 import { consentToken } from "@/server/consent";
 import { getConfig } from "@/server/config";
+import { redirectToApp } from "@/server/redirect";
 import { readPendingSession } from "@/server/session";
 import { zitadel } from "@/server/zitadel/service";
 import styles from "@/components/auth/consent.module.css";
@@ -36,7 +37,7 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
   let state: AuthenticationState | undefined;
   try { state = await inspectAuthentication(pending, pending.userId); }
   catch { /* Render the expired-request state below, never a consent form. */ }
-  if (state && state.step !== "complete") redirect(authLink("/verify", context));
+  if (state && state.step !== "complete") redirectToApp(authLink("/verify", context));
 
   let view: { appName: string; appHost: string; token: string; scopes: string[]; displayName: string; email: string; avatarUrl?: string } | undefined;
   try {

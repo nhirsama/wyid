@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { create } from "@bufbuild/protobuf";
 import { AuthRequestSchema } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
@@ -9,7 +9,7 @@ vi.mock("@/server/authentication", () => ({ inspectAuthentication: mocks.inspect
 vi.mock("@/server/session", () => ({ readPendingSession: mocks.pending, readAuthenticatedSession: mocks.authenticated, writePendingSession: mocks.write, writeAuthenticatedSession: mocks.write }));
 vi.mock("@/server/actions", () => ({ logout: vi.fn(), resumeAccountAuthentication: vi.fn() }));
 vi.mock("@/server/brand", () => ({ getBrand: () => ({ nickname: "Test ID" }) }));
-vi.mock("@/server/config", () => ({ getConfig: () => ({ sessionSecret: "a-test-secret-that-is-at-least-32-characters" }) }));
+vi.mock("@/server/config", () => ({ getAppUrl: () => "https://login.example.com", getConfig: () => ({ sessionSecret: "a-test-secret-that-is-at-least-32-characters" }) }));
 vi.mock("@/server/zitadel/service", () => ({ zitadel: { authRequest: mocks.request, applicationName: async () => "Test App" } }));
 vi.mock("next/navigation", () => ({ redirect: (url: string) => { throw new Error(`NEXT_REDIRECT:${url}`); } }));
 vi.mock("@/components/auth/mfa-forms", () => ({
@@ -32,11 +32,13 @@ function state(step = "mfa", extra = {}) {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("BASE_PATH", "/");
   mocks.pending.mockResolvedValue(pending);
   mocks.authenticated.mockResolvedValue({ sessionId: pending.sessionId, sessionToken: pending.sessionToken, userId: pending.userId });
   mocks.inspect.mockResolvedValue(state());
   mocks.request.mockResolvedValue(create(AuthRequestSchema, { id: "V2_test", clientId: "test-client", redirectUri: "https://app.example.com/callback", scope: ["openid"] }));
 });
+afterEach(() => vi.unstubAllEnvs());
 
 describe("verification route trusts the live gate instead of cookie method flags", () => {
   it.each([undefined, "V2_test"])("matches the reference verification heading without a domain for authRequest=%s", async authRequestId => {
@@ -113,5 +115,17 @@ describe("account portal does not treat an old authenticated cookie as proof", (
     mocks.inspect.mockRejectedValueOnce(new Error("unavailable"));
     await expect(AccountPage()).rejects.toThrow("NEXT_REDIRECT:/login");
     expect(mocks.write).not.toHaveBeenCalled();
+  });
+  it.each(["/123", "/123/", "/account/login-ui", "/custom-login"])('keeps every account entry redirect under runtime BASE_PATH="%s"', async basePath => {
+    vi.stubEnv("BASE_PATH", basePath);
+    const prefix = `https://login.example.com${basePath.replace(/\/+$/, "")}`;
+    mocks.inspect.mockResolvedValue(state("complete"));
+    await expect(AccountPage()).rejects.toThrow(`NEXT_REDIRECT:${prefix}/account/apps`);
+    mocks.inspect.mockRejectedValueOnce(new Error("unavailable"));
+    await expect(AccountPage()).rejects.toThrow(`NEXT_REDIRECT:${prefix}/login`);
+    mocks.authenticated.mockResolvedValueOnce(null);
+    await expect(AccountPage()).rejects.toThrow(`NEXT_REDIRECT:${prefix}/login`);
+    mocks.inspect.mockResolvedValue(state("mfa"));
+    await expect(ConsentPage({ searchParams })).rejects.toThrow(`NEXT_REDIRECT:${prefix}/verify?authRequest=V2_test`);
   });
 });

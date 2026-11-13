@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { redirectToApp } from "@/server/redirect";
 import { AuthPanel } from "@/components/auth/auth-shell";
 import { Notice } from "@/components/ui/form";
 import { readAuthenticatedSession } from "@/server/session";
@@ -9,13 +9,13 @@ export const metadata = { title: "账号" };
 
 export default async function AccountPage() {
   const session = await readAuthenticatedSession();
-  if (!session) redirect("/login");
+  if (!session) redirectToApp("/login");
 
   let state: AuthenticationState;
   try {
     state = await inspectAuthentication(session, session.userId);
   } catch {
-    redirect("/login");
+    redirectToApp("/login");
   }
 
   if (state.step !== "complete") return <AuthPanel title="继续身份验证" description="账号的验证要求尚未完成或已过期。">
@@ -26,6 +26,5 @@ export default async function AccountPage() {
     </div>
   </AuthPanel>;
 
-  // Page redirects are prefixed by Next.js itself, including runtime basePath.
-  redirect("/account/apps");
+  redirectToApp("/account/apps");
 }

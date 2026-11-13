@@ -29,6 +29,13 @@ function isOrigin(value: string, allowInternalHttp = false) {
 
 const origin = z.url().refine(value => isOrigin(value)).transform(value => new URL(value).origin);
 
+/** Navigation only needs the public origin, not the upstream credentials. */
+export function getAppUrl() {
+  const result = origin.safeParse(process.env.APP_URL);
+  if (!result.success) throw new ConfigurationError(["APP_URL"]);
+  return result.data;
+}
+
 function parseHost(value: string, variable: string) {
   if (!value || /[\s\\/?#@,%${}\u0000-\u001f\u007f]/.test(value)) throw new ConfigurationError([variable]);
   try {

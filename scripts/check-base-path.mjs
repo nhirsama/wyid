@@ -11,7 +11,7 @@ import { EncryptJWT } from "jose";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import { GetLoginSettingsResponseSchema, GetPasswordComplexitySettingsResponseSchema } from "@zitadel/proto/zitadel/settings/v2/settings_service_pb.js";
 import { GetAuthRequestRequestSchema, GetAuthRequestResponseSchema } from "@zitadel/proto/zitadel/oidc/v2/oidc_service_pb.js";
-import { GetSessionResponseSchema, ListSessionsResponseSchema } from "@zitadel/proto/zitadel/session/v2/session_service_pb.js";
+import { CreateSessionResponseSchema, GetSessionResponseSchema, ListSessionsResponseSchema } from "@zitadel/proto/zitadel/session/v2/session_service_pb.js";
 import { GetUserByIDResponseSchema, ListAuthenticationFactorsResponseSchema, ListPasskeysResponseSchema, UpdateHumanUserResponseSchema } from "@zitadel/proto/zitadel/user/v2/user_service_pb.js";
 import { ListUserMembershipsResponseSchema, ListAppsResponseSchema, GetAppByIDResponseSchema } from "@zitadel/proto/zitadel/management_pb.js";
 
@@ -19,6 +19,7 @@ const fixtureUser = { userId: "fixture-user", username: "fixture-user", details:
 const fixtureApp = { id: "fixture-app", name: "Portal Application", state: 1, config: { case: "oidcConfig", value: { clientId: "fixture-client", appType: 1, redirectUris: ["https://site.example.test/callback"], additionalOrigins: ["https://site.example.test"] } } };
 const fixtureSession = () => ({ id: "fixture-session", factors: { user: { id: "fixture-user" }, password: { verifiedAt: { seconds: BigInt(Math.floor(Date.now() / 1000)) } } } });
 const fixtureSecret = "local-fixture-session-secret-at-least-32-chars";
+const fixtureOrigin = "https://auth.example.test";
 const userRpcHeaders = [];
 
 // One deployment contract: every app-owned URL stays under BASE_PATH.
@@ -89,6 +90,8 @@ upstream.on("stream", (stream, headers) => {
       const request = fromBinary(GetAuthRequestRequestSchema, Buffer.concat(body).subarray(5));
       schema = GetAuthRequestResponseSchema;
       value = { authRequest: { id: request.authRequestId, clientId: "fixture-client", redirectUri: "https://app.example.test/callback", scope: ["openid"] } };
+    } else if (path.endsWith("/CreateSession")) {
+      schema = CreateSessionResponseSchema; value = { sessionId: "fixture-session", sessionToken: "fixture-user-session-token" };
     } else if (path.endsWith("/GetSession")) {
       schema = GetSessionResponseSchema; value = { session: fixtureSession() };
     } else if (path.endsWith("/ListSessions")) {
@@ -148,18 +151,52 @@ async function checkPortalBrowser(origin, basePath, jwt) {
   const { expect } = await import("@playwright/test");
   const context = await browser.newContext();
   try {
-    await context.addCookies([{ name: "__Host-wyid-session", value: jwt, domain: new URL(origin).hostname, path: "/", secure: true, httpOnly: true, sameSite: "Lax" }]);
-    // The check is deliberately local-only, including font stylesheets.
-    await context.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.fulfill({ body: "", contentType: "text/css" }));
+    await context.addCookies([{ name: "__Host-wyid-session", value: jwt, domain: new URL(fixtureOrigin).hostname, path: "/", secure: true, httpOnly: true, sameSite: "Lax" }]);
+    // Keep the browser at the configured public origin, while sending every
+    // request to the local production server. No real identity service or
+    // public network is involved; the actual Next client is left unchanged.
+    await context.route("**/*", async route => {
+      const request = route.request(), url = new URL(request.url());
+      if (url.origin !== fixtureOrigin) return route.fulfill({ body: "", contentType: "text/css" });
+      const response = await route.fetch({
+        url: `${origin}${url.pathname}${url.search}`,
+        headers: { ...request.headers(), host: new URL(fixtureOrigin).host, "x-forwarded-host": new URL(fixtureOrigin).host },
+        maxRedirects: 0,
+      });
+      return route.fulfill({ response });
+    });
     const page = await context.newPage();
     const documents = [], failures = [], reads = [];
     page.on("pageerror", error => failures.push(error.message));
     page.on("request", request => {
       if (request.isNavigationRequest()) documents.push(request.url());
       if (request.url().includes("/api/account/apps")) reads.push(request.url());
+      if (new URL(request.url()).origin === fixtureOrigin) {
+        try { checkUrl(request.url(), fixtureOrigin, basePath, "Browser request"); }
+        catch (error) { failures.push(error.message); }
+      }
     });
-    page.on("response", response => { if (response.url().startsWith(origin) && response.status() >= 400) failures.push(`${response.status()} ${response.url()}`); });
-    await page.goto(`${origin}${basePath}/account/apps`);
+    page.on("response", response => { if (response.url().startsWith(fixtureOrigin) && response.status() >= 400) failures.push(`${response.status()} ${response.url()}`); });
+    // Enter through the real authenticated landing route. Direct portal links
+    // cannot detect redirects that lose the runtime prefix during hydration.
+    await page.goto(`${fixtureOrigin}${basePath}/account`);
+    await expect(page).toHaveURL(`${fixtureOrigin}${basePath}/account/apps`);
+    await expect(page.getByRole("link", { name: "Portal Application", exact: true })).toBeVisible();
+    // Exercise the real Server Action and cookie updates, not a mock action.
+    await page.goto(`${fixtureOrigin}${basePath}/login`);
+    await expect(page).toHaveURL(`${fixtureOrigin}${basePath}/account/apps`);
+    await expect(page.getByRole("link", { name: "Portal Application", exact: true })).toBeVisible();
+    await context.clearCookies();
+    await page.goto(`${fixtureOrigin}${basePath}/login`);
+    await page.getByLabel("邮箱或用户名", { exact: true }).fill("fixture-user");
+    await page.getByLabel("密码", { exact: true }).fill("fixture-password");
+    await page.getByRole("button", { name: "登录", exact: true }).click();
+    await expect(page).toHaveURL(`${fixtureOrigin}${basePath}/account/apps`);
+    await expect(page.getByRole("link", { name: "Portal Application", exact: true })).toBeVisible();
+    assert.deepEqual(failures, [], "Login escaped the configured deployment path");
+    documents.length = 0;
+    reads.length = 0;
+    await page.goto(`${fixtureOrigin}${basePath}/account/apps`);
     await expect(page.getByRole("link", { name: "Portal Application", exact: true })).toBeVisible();
     const shell = await page.locator(".portal").elementHandle();
     await page.getByRole("link", { name: "Portal Application", exact: true }).click();
@@ -179,9 +216,9 @@ async function checkPortalBrowser(origin, basePath, jwt) {
     assert.equal(reads.length, 2, "Portal revisits did not reuse their private data cache");
     assert.deepEqual(failures, [], "Production client failed during navigation");
     // Reloading a deep link still renders the server-validated page correctly.
-    await page.goto(`${origin}${basePath}/account/apps/fixture-project%3Afixture-app`);
+    await page.goto(`${fixtureOrigin}${basePath}/account/apps/fixture-project%3Afixture-app`);
     await expect(page.getByRole("heading", { name: "Portal Application", exact: true })).toBeVisible();
-    console.log(`PASS browser BASE_PATH=${basePath || "/"}: one document, stable portal shell, history, private cache and deep links`);
+    console.log(`PASS browser BASE_PATH=${basePath || "/"}: password login, session reuse, landing redirect, one document, stable portal shell, history, private cache and deep links`);
   } finally { await context.close(); }
 }
 
@@ -235,6 +272,16 @@ async function checkDeployment(basePath, apiPort) {
       .setAudience("wyid:authenticated-session").setIssuedAt().setExpirationTime("5m")
       .encrypt(createHash("sha256").update(fixtureSecret).digest());
     const accountHeaders = { Cookie: `__Host-wyid-session=${jwt}` };
+    const accountUrl = `${origin}${basePath}/account`;
+    const entryResponse = await fetchLocal(accountUrl, { headers: accountHeaders });
+    assert.ok(entryResponse.status === 200 || entryResponse.status === 307, `Account entry failed: ${entryResponse.status}`);
+    const entryHtml = await entryResponse.text();
+    const entryTargets = [entryResponse.headers.get("location"), ...Array.from(entryHtml.matchAll(/content="[^"\n]*?url=([^"\n]+)"/gi), match => match[1])].filter(Boolean);
+    assert.ok(entryTargets.length, "Authenticated account entry must redirect");
+    for (const target of entryTargets) {
+      const url = checkUrl(target, accountUrl, basePath, "Authenticated account entry redirect");
+      assert.equal(url?.pathname, `${basePath}/account/apps`, "Account entry must preserve the runtime path");
+    }
     for (const route of ["/account/apps", "/account/apps/new", "/account/apps/fixture-project:fixture-app", "/account/settings/profile", "/account/settings/security", "/account/settings/devices", "/account/help"]) {
       const url = `${origin}${basePath}${route}`;
       const response = await fetchLocal(url, { headers: accountHeaders });

@@ -11,9 +11,8 @@ import { getConfig } from "./config";
 import { zitadel, type SessionRef } from "./zitadel/service";
 import { authenticationExpiresAt, canReuseAuthentication, inspectAuthentication, requiresFreshLogin, type AuthenticationState } from "./authentication";
 import { ErrorReason, Prompt, type AuthRequest } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
-import { redirect } from "next/navigation";
+import { redirectToApp } from "./redirect";
 import { consentToken, matchesConsentToken } from "./consent";
-import { runtimeBasePath, siteUrl } from "@/lib/paths";
 import { readPasskeyAccount, writePasskeyAccount } from "./passkey-account";
 import { classifyCallbackError } from "./zitadel/errors";
 import { inspectIdentityProvider } from "./identity-provider";
@@ -22,13 +21,6 @@ const contextSchema = z.object({ authRequestId: z.string().min(1).max(1024).opti
 function context(raw: AuthContext) { return contextSchema.parse(raw); }
 const keyMethodSchema = z.literal("u2f");
 const otpMethodSchema = z.enum(["otpEmail", "otpSms"]);
-
-function redirectFromAction(path: string): never {
-  // Unlike page-render redirects, MPA Server Actions send Location unchanged.
-  // Use a full URL for subpaths so Next cannot prepend BASE_PATH a second time
-  // while attempting to stream the redirect destination for a fetch action.
-  redirect(runtimeBasePath() ? siteUrl(path, getConfig().appUrl).href : path);
-}
 
 async function pendingFor(ctx: ReturnType<typeof context>) {
   const pending = await readPendingSession();
@@ -408,11 +400,11 @@ export async function resumeLogin(rawContext: AuthContext): Promise<ActionResult
 }
 export async function resumeAccountAuthentication() {
   const session = await readAuthenticatedSession();
-  if (!session) redirectFromAction("/login");
+  if (!session) redirectToApp("/login");
   await clearAuthenticatedSession();
   const result = await finishOrFactor({ ...session, mfaStartedAt: Date.now() });
-  if (result.ok && result.redirect) redirectFromAction(result.redirect);
-  redirectFromAction("/login");
+  if (result.ok && result.redirect) redirectToApp(result.redirect);
+  redirectToApp("/login");
 }
 export async function register(raw: unknown, rawContext: AuthContext): Promise<ActionResult> {
   try {
@@ -498,7 +490,7 @@ export async function logout() {
   }
   await clearAuthenticatedSession();
   await clearPendingSession();
-  redirectFromAction("/login");
+  redirectToApp("/login");
 }
 export async function completeIdentityProvider(raw: unknown): Promise<ActionResult> {
   try {

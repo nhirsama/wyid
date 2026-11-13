@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   writePendingSession: vi.fn(), readPendingSession: vi.fn(), clearPendingSession: vi.fn(),
   readPasskeyAccount: vi.fn(), writePasskeyAccount: vi.fn(),
 }));
-vi.mock("@/server/config", () => ({ getConfig: mocks.config, ConfigurationError: class ConfigurationError extends Error {} }));
+vi.mock("@/server/config", () => ({ getConfig: mocks.config, getAppUrl: () => mocks.config().appUrl, ConfigurationError: class ConfigurationError extends Error {} }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("@/server/session", () => ({ writePendingSession: mocks.writePendingSession, readPendingSession: mocks.readPendingSession, clearPendingSession: mocks.clearPendingSession, writeAuthenticatedSession: mocks.writeAuthenticatedSession, clearAuthenticatedSession: mocks.clearAuthenticatedSession, readAuthenticatedSession: mocks.readAuthenticatedSession }));
 vi.mock("@/server/passkey-account", () => ({ readPasskeyAccount: mocks.readPasskeyAccount, writePasskeyAccount: mocks.writePasskeyAccount }));
