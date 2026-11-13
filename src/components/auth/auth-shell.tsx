@@ -4,11 +4,13 @@ import Image from "next/image";
 import { useState, type ReactNode } from "react";
 import { useBrand } from "./brand-provider";
 import { useAuthActionFlow } from "./auth-action-provider";
+import { PageBackdrop } from "../page-backdrop";
 
 export function AuthShell({ children }: { children: ReactNode }) {
   const brand = useBrand();
   return (
     <main className="auth-page" id="main-content">
+      <PageBackdrop />
       <div className="auth-container">
         <div className="auth-brand">
           {brand.icon && <Image src={brand.icon} alt="" width={36} height={40} priority unoptimized />}

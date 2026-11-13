@@ -8,13 +8,13 @@
   align-items: center;
   justify-content: center;
   padding: 38px 20px;
-  background: #f5f7fb;
   color: #374665;
   -webkit-font-smoothing: auto;
 }
 
 :global(.auth-page):has(.card) :global(.auth-container) { display: contents; }
-:global(.auth-page):has(.card) :global(.auth-brand) { margin: 0 0 26px; }
+:global(.auth-page):has(.card) :global(.auth-container) > * { position: relative; z-index: 1; }
+:global(.auth-page):has(.card) :global(.auth-brand) { position: relative; z-index: 1; margin: 0 0 26px; }
 :global(.auth-page):has(.card) :global(.auth-brand) span { font-size: 23px; font-weight: 600; letter-spacing: -.5px; }
 :global(.auth-page):has(.card) :global(.auth-brand) img { height: 39px; }
 

@@ -13,7 +13,7 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--background); color: var(--text); font-family: var(--sans); font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
+body { margin: 0; background: radial-gradient(620px 420px at 12% 16%, #e9f0fa 0%, transparent 70%), radial-gradient(560px 420px at 90% 88%, #fbeff5 0%, transparent 70%), var(--background); background-attachment: fixed; color: var(--text); font-family: var(--sans); font-size: 16px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
 button, input { font: inherit; }
 button, a, input { -webkit-tap-highlight-color: transparent; }
 button, a { touch-action: manipulation; }
@@ -30,8 +30,18 @@ h1, p { overflow-wrap: anywhere; }
 .skip-link:focus { top: 16px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 
-.auth-page { display: flex; min-height: 100svh; align-items: center; justify-content: center; padding: 44px 20px; }
-.auth-container { width: 100%; max-width: 445px; }
+.auth-page { position: relative; isolation: isolate; display: flex; min-height: 100svh; align-items: center; justify-content: center; padding: 44px 20px; }
+.auth-container { position: relative; z-index: 1; width: 100%; max-width: 445px; }
+.page-backdrop { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.motif { position: absolute; left: calc(50% + var(--x)); top: var(--y); width: var(--w); translate: -50% -50%; rotate: var(--r); }
+.motif.motif-edge { left: var(--x); }
+.motif svg { display: block; width: 100%; height: auto; }
+.motif.blue { color: #bccde4; }
+.motif.pink { color: #e8bdd1; }
+.motif-narrow { display: none; }
+@media (max-width: 1180px) { .motif.outer { display: none; } }
+@media (max-width: 860px) { .motif-wide { display: none; } }
+@media (max-width: 760px) { .motif-narrow { display: block; } .portal-backdrop .motif-edge { opacity: .7; } }
 .auth-brand { display: flex; align-items: center; justify-content: center; gap: 12px; width: fit-content; margin: 0 auto 26px; color: #405a7e; border-radius: 6px; }
 .auth-brand img { object-fit: contain; flex-shrink: 0; }
 .auth-brand span { font-size: 23px; font-weight: 600; letter-spacing: -.5px; }
