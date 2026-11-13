@@ -317,7 +317,7 @@
   .form {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 19px;
   }
   .field {
     display: flex;
@@ -331,25 +331,38 @@
     font-weight: 500;
   }
   input,select,textarea {
+    display: block;
     width: 100%;
+    min-height: 44px;
     padding: 10px 12px;
     border: 1px solid #b7c5d8;
     border-radius: 8px;
     background: #fff;
     color: #455c7e;
     font-size: 15px;
+    line-height: 1.5;
     min-width: 0;
   }
   input::placeholder,textarea::placeholder {
-    color: #95a3b8;
+    color: var(--muted);
   }
   input:hover,select:hover,textarea:hover {
-    border-color: #9fb3cf;
+    border-color: #9fb2cc;
   }
   input:focus,select:focus,textarea:focus {
-    border-color: var(--blue);
+    border-color: #8baad4;
     outline: 2px solid #e5eefb;
     outline-offset: 0;
+  }
+  input[aria-invalid="true"],select[aria-invalid="true"],textarea[aria-invalid="true"] {
+    border-color: #d28ba8;
+  }
+  input[aria-invalid="true"]:focus,select[aria-invalid="true"]:focus,textarea[aria-invalid="true"]:focus {
+    outline-color: #fae8f0;
+  }
+  input:disabled,select:disabled,textarea:disabled {
+    background: #fafbfd;
+    color: #92a0b5;
   }
   .field small,.field-hint,.uri-fields>small {
     color: var(--muted);
@@ -410,7 +423,7 @@
     max-width: 760px;
   }
   .settings-form {
-    max-width: 580px;
+    max-width: 445px;
   }
   .body-copy {
     color: #7c8ca5;
@@ -1158,13 +1171,13 @@
   }
 }
 .account-ui .primary-button {
-  min-height: 42px;
+  min-height: 44px;
 }
 .account-ui .panel {
   border-radius: 14px;
 }
-.account-ui .field input, .account-ui .field select {
-  min-height: 44px;
+.account-ui .form > .primary-button {
+  width: 100%;
 }
 .account-ui .mobile-navigation nav {
   display: grid;
