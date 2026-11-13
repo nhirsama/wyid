@@ -1,5 +1,5 @@
 .account-ui {
-  .primary-button,.small-button,.danger-button,.danger-outline,.avatar-file-input::file-selector-button {
+  .primary-button,.small-button,.danger-button,.danger-outline {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -19,13 +19,13 @@
     background: var(--blue-hover);
     border-color: var(--blue-hover);
   }
-  .small-button,.avatar-file-input::file-selector-button {
+  .small-button {
     border: 1px solid #dfe6f0;
     background: #fff;
     color: #647fa5;
     padding: 8px 12px;
   }
-  .small-button:hover,.avatar-file-input:not(:disabled)::file-selector-button:hover {
+  .small-button:hover {
     border-color: #adc7e9;
     background: #f6faff;
     color: #5075a6;
@@ -98,19 +98,6 @@
   }
   .skip-link:focus {
     top: 12px;
-  }
-  .avatar-file-input::file-selector-button {
-    font-family: inherit;
-    cursor: pointer;
-    margin-right: 12px;
-    transition: background .15s,border-color .15s,color .15s;
-  }
-  .avatar-file-input:disabled {
-    cursor: wait;
-  }
-  .avatar-file-input:disabled::file-selector-button {
-    cursor: wait;
-    opacity: .55;
   }
   .portal {
     position: relative;
@@ -424,6 +411,76 @@
   }
   .settings-form {
     max-width: 445px;
+  }
+  .profile-layout {
+    display: grid;
+    grid-template-columns: minmax(0,1fr) 216px;
+    align-items: start;
+    gap: 48px;
+  }
+  .profile-fields,.profile-avatar {
+    min-width: 0;
+  }
+  .profile-section-title {
+    margin: 0 0 16px;
+    font-size: 15px;
+    font-weight: 500;
+    color: #596e8d;
+  }
+  .profile-email {
+    border-top: 1px solid var(--border);
+    margin-top: 28px;
+    padding-top: 24px;
+  }
+  .profile-email .email-current strong {
+    overflow-wrap: anywhere;
+  }
+  .profile-avatar .form {
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .avatar-picker {
+    display: block;
+    position: relative;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+  }
+  .avatar-picker .avatar {
+    font-size: 56px;
+    box-shadow: 0 0 0 1px #dfe6f0;
+    transition: box-shadow .15s;
+  }
+  .avatar-picker:not(:disabled):hover .avatar {
+    box-shadow: 0 0 0 3px #e0eafa;
+  }
+  .avatar-edit-badge {
+    position: absolute;
+    right: -4px;
+    bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+    color: #596e8d;
+    box-shadow: 0 2px 8px #4662890d;
+    font-size: 13px;
+  }
+  .avatar-file-input {
+    display: none;
+  }
+  .profile-avatar .notice {
+    margin: 0;
+  }
+  .profile-avatar .form-actions {
+    justify-content: flex-start;
+    gap: 8px;
+    margin: 0;
   }
   .body-copy {
     color: #7c8ca5;
@@ -992,6 +1049,15 @@
     }
     .config-grid {
       grid-template-columns: 1fr;
+    }
+    .profile-layout {
+      grid-template-columns: minmax(0,1fr);
+      gap: 28px;
+    }
+    .profile-avatar {
+      grid-row: 1;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 24px;
     }
   }
   @media(max-width:760px) {

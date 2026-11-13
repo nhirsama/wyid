@@ -15,7 +15,48 @@ function Profile({ account, onAccount }: { account: Account; onAccount: (value: 
   const profileTask = useTask();
   const emailTask = useTask();
   const [verificationUserId, setVerificationUserId] = useState("");
-  return <><AvatarSettings account={account} onAccount={onAccount} /><Panel title="个人资料" description="你的账号基础资料。"><TaskNotice task={profileTask} /><form method="post" className="form settings-form" onSubmit={e => { e.preventDefault(); const form = e.currentTarget; const data = { displayName: formValue(form, "displayName"), preferredLanguage: formValue(form, "preferredLanguage") }; profileTask.run(async () => { const result = await api<{ account: Account }>("/me", { method: "PATCH", body: JSON.stringify(data) }); onAccount(result.account); }, "个人资料已保存。"); }}><Field label="昵称"><input name="displayName" autoComplete="nickname" defaultValue={account.displayName} maxLength={200} required /></Field><Field label="通知语言"><select name="preferredLanguage" defaultValue={account.preferredLanguage}><option value="zh-CN">简体中文</option><option value="en">English</option>{!["zh-CN", "en"].includes(account.preferredLanguage) && <option value={account.preferredLanguage}>{account.preferredLanguage}</option>}</select></Field><Submit busy={profileTask.busy}>保存资料</Submit></form></Panel><Panel title="邮箱"><div className="email-current"><strong>{account.email}</strong><span className={`status-tag ${account.emailVerified ? "ok" : "pending"}`}>{account.emailVerified ? "已验证" : "待验证"}</span></div><TaskNotice task={emailTask} />{verificationUserId && <Notice kind="success">验证邮件已发送。<Link href={`/verify-email?userID=${encodeURIComponent(verificationUserId)}`}>输入验证码</Link></Notice>}<form method="post" className="form settings-form" onSubmit={e => { e.preventDefault(); const form = e.currentTarget; const data = { email: formValue(form, "email"), password: formValue(form, "password") }; emailTask.run(async () => { const result = await post<{ userId: string; account: Account }>("/me/email", data); setVerificationUserId(result.userId); onAccount(result.account); form.reset(); }); }}><Field label={account.emailVerified ? "新邮箱" : "邮箱"}><input name="email" type="email" autoComplete="email" defaultValue={account.emailVerified ? "" : account.email} required /></Field><Field label="当前登录密码"><Password /></Field><Submit busy={emailTask.busy}>保存并发送验证邮件</Submit></form></Panel></>;
+  return <Panel title="个人资料" description="管理你的头像、昵称与联系邮箱。">
+    <div className="profile-layout">
+      <div className="profile-fields">
+        <TaskNotice task={profileTask} />
+        <form method="post" className="form settings-form" onSubmit={e => {
+          e.preventDefault();
+          const form = e.currentTarget;
+          const data = { displayName: formValue(form, "displayName"), preferredLanguage: formValue(form, "preferredLanguage") };
+          profileTask.run(async () => {
+            const result = await api<{ account: Account }>("/me", { method: "PATCH", body: JSON.stringify(data) });
+            onAccount(result.account);
+          }, "个人资料已保存。");
+        }}>
+          <Field label="昵称"><input name="displayName" autoComplete="nickname" defaultValue={account.displayName} maxLength={200} required /></Field>
+          <Field label="通知语言"><select name="preferredLanguage" defaultValue={account.preferredLanguage}><option value="zh-CN">简体中文</option><option value="en">English</option>{!["zh-CN", "en"].includes(account.preferredLanguage) && <option value={account.preferredLanguage}>{account.preferredLanguage}</option>}</select></Field>
+          <Submit busy={profileTask.busy}>保存资料</Submit>
+        </form>
+        <section className="profile-email" aria-label="邮箱">
+          <h3 className="profile-section-title">邮箱</h3>
+          <div className="email-current"><strong>{account.email}</strong><span className={`status-tag ${account.emailVerified ? "ok" : "pending"}`}>{account.emailVerified ? "已验证" : "待验证"}</span></div>
+          <TaskNotice task={emailTask} />
+          {verificationUserId && <Notice kind="success">验证邮件已发送。<Link href={`/verify-email?userID=${encodeURIComponent(verificationUserId)}`}>输入验证码</Link></Notice>}
+          <form method="post" className="form settings-form" onSubmit={e => {
+            e.preventDefault();
+            const form = e.currentTarget;
+            const data = { email: formValue(form, "email"), password: formValue(form, "password") };
+            emailTask.run(async () => {
+              const result = await post<{ userId: string; account: Account }>("/me/email", data);
+              setVerificationUserId(result.userId);
+              onAccount(result.account);
+              form.reset();
+            });
+          }}>
+            <Field label={account.emailVerified ? "新邮箱" : "邮箱"}><input name="email" type="email" autoComplete="email" defaultValue={account.emailVerified ? "" : account.email} required /></Field>
+            <Field label="当前登录密码"><Password /></Field>
+            <Submit busy={emailTask.busy}>保存并发送验证邮件</Submit>
+          </form>
+        </section>
+      </div>
+      <AvatarSettings account={account} onAccount={onAccount} />
+    </div>
+  </Panel>;
 }
 
 function Security({ config }: { config: PublicConfig }) {
@@ -36,5 +77,5 @@ function Devices() {
 
 export function SettingsView({ route, account, onAccount, config }: { route: string; account: Account; onAccount: (value: Account) => void; config: PublicConfig }) {
   const tab = route.endsWith("/security") ? "security" : route.endsWith("/devices") ? "devices" : "profile";
-  return <><Title title="账号设置" description="维护你的资料、验证方式和登录设备。" /><nav className="tabs" aria-label="账号设置">{[["profile", "个人资料与邮箱"], ["security", "密码与验证方式"], ["devices", "登录设备"]].map(([id, label]) => <Link key={id} className={tab === id ? "selected" : ""} aria-current={tab === id ? "page" : undefined} href={`/settings/${id}`}>{label}</Link>)}</nav>{tab === "profile" ? <Profile account={account} onAccount={onAccount} /> : tab === "security" ? <Security config={config} /> : <Devices />}</>;
+  return <><Title title="账号设置" description="维护你的资料、验证方式和登录设备。" /><nav className="tabs" aria-label="账号设置">{[["profile", "个人资料"], ["security", "密码与验证方式"], ["devices", "登录设备"]].map(([id, label]) => <Link key={id} className={tab === id ? "selected" : ""} aria-current={tab === id ? "page" : undefined} href={`/settings/${id}`}>{label}</Link>)}</nav>{tab === "profile" ? <Profile account={account} onAccount={onAccount} /> : tab === "security" ? <Security config={config} /> : <Devices />}</>;
 }

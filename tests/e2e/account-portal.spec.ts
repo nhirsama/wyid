@@ -38,23 +38,31 @@ test.beforeAll(async () => {
   html = `<!doctype html><html lang="zh-CN" data-base-path="/id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>`;
 });
 const initialApp = { id: "project:app", projectId: "project", name: "测试网站", website: "https://site.example.com", type: "spa", enabled: true, clientId: "client-id", redirectUris: ["https://site.example.com/callback"], postLogoutRedirectUris: [], createdAt: "2026-11-12T00:00:00Z", updatedAt: "2026-11-12T00:00:00Z" };
+const avatarImage = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64");
 test.beforeEach(async ({ context }) => {
   const apps = [structuredClone(initialApp)];
+  const account = { id: "user", displayName: "测试账号", givenName: "Given", familyName: "Family", email: "user@example.com", emailVerified: true, preferredLanguage: "zh-CN", avatarUrl: "" };
   const methods: { type: string; id?: string; name: string; state: string }[] = [];
   const calls: { path: string; method: string; data: Record<string, unknown> }[] = [];
   let credentialId = "";
   await context.route("**/*", async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     if (path === "/fixture.js") return route.fulfill({ contentType: "text/javascript; charset=utf-8", body: javascript });
+    if (request.url() === "https://assets.example.com/avatar.png") return route.fulfill({ contentType: "image/png", body: avatarImage });
     if (!path.includes("/api/account/")) {
       const basePath = path.slice(0, path.lastIndexOf("/account/"));
       return route.fulfill({ contentType: "text/html; charset=utf-8", body: html.replace('data-base-path="/id"', `data-base-path="${basePath}"`) });
     }
     const endpoint = path.slice(path.indexOf("/api/account") + "/api/account".length), method = request.method();
-    const data = method === "GET" ? {} : request.postDataJSON() || {};
+    const data = method === "GET" || request.headers()["content-type"]?.startsWith("multipart/form-data") ? {} : request.postDataJSON() || {};
     calls.push({ path: endpoint, method, data });
     let value: unknown = {};
-    if (endpoint === "/me") value = { account: { id: "user", displayName: data.displayName || "测试账号", email: "user@example.com", emailVerified: true, preferredLanguage: data.preferredLanguage || "zh-CN", givenName: "Given", familyName: "Family" } };
+    if (endpoint === "/me") {
+      if (method === "PATCH") { account.displayName = data.displayName; account.preferredLanguage = data.preferredLanguage; }
+      value = { account };
+    }
+    else if (endpoint === "/me/avatar") { account.avatarUrl = method === "DELETE" ? "" : "https://assets.example.com/avatar.png"; value = { account }; }
+    else if (endpoint === "/me/email") { account.email = data.email; account.emailVerified = false; value = { userId: account.id, account }; }
     else if (endpoint === "/apps" && method === "GET") value = { applications: apps };
     else if (endpoint === "/apps" && method === "POST") { const app = { ...initialApp, ...data, id: "project:new-app", clientId: "new-client-id" }; apps.push(app); value = { application: app, ...(data.type === "web" ? { clientSecret: "one-time-secret" } : {}) }; }
     else if (endpoint.startsWith("/apps/") && method === "GET") value = { application: apps.find(app => app.id === decodeURIComponent(endpoint.slice(6))) };
@@ -135,9 +143,106 @@ test("profile saves survive a page switch without refetching the entire portal",
   await expect(page.getByText("个人资料已保存。", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "密码与验证方式", exact: true }).click();
   await expect(page.getByRole("heading", { name: "两步验证", exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "个人资料与邮箱", exact: true }).click();
+  await page.getByRole("link", { name: "个人资料", exact: true }).click();
   await expect(page.getByLabel("昵称", { exact: true })).toHaveValue("新的昵称");
   await expect(page.locator(".sidebar-user strong")).toHaveText("新的昵称");
+});
+
+test("a unified profile places an editable avatar beside the forms and uploads without reloading", async ({ page, isMobile }, testInfo) => {
+  await page.goto("http://localhost/id/account/settings/profile");
+  await expect(page.locator(".panel")).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "个人资料", exact: true })).toBeVisible();
+  const input = page.getByLabel("选择头像图片", { exact: true });
+  await expect(input).toBeHidden();
+  await expect(page.getByRole("button", { name: "保存头像", exact: true })).toHaveCount(0);
+  const fields = await page.locator(".profile-fields").boundingBox();
+  const avatar = await page.locator(".profile-avatar").boundingBox();
+  if (isMobile) expect(avatar!.y + avatar!.height).toBeLessThanOrEqual(fields!.y);
+  else expect(fields!.x + fields!.width).toBeLessThanOrEqual(avatar!.x);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
+  await page.screenshot({ path: testInfo.outputPath("profile.png"), fullPage: true });
+
+  const shell = await page.locator(".portal").elementHandle();
+  await page.getByLabel("昵称", { exact: true }).fill("未保存的昵称");
+  const chooserPromise = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "更换头像", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await (await chooserPromise).setFiles({ name: "avatar.png", mimeType: "image/png", buffer: avatarImage });
+  await expect(page.getByRole("img", { name: "所选头像预览", exact: true })).toBeVisible();
+  const upload = page.waitForRequest(request => request.url().endsWith("/me/avatar") && request.method() === "POST");
+  await page.getByRole("button", { name: "保存头像", exact: true }).click();
+  const request = await upload;
+  expect(request.headers()["content-type"]).toContain("multipart/form-data");
+  expect(request.postDataBuffer()?.toString()).toContain('filename="avatar.png"');
+  await expect(page.getByText("头像已更新。", { exact: true })).toBeVisible();
+  await expect(page.locator(".sidebar-user .avatar img")).toHaveAttribute("src", "https://assets.example.com/avatar.png");
+  await expect(page.getByRole("img", { name: "所选头像预览", exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("昵称", { exact: true })).toHaveValue("未保存的昵称");
+  expect(await shell!.evaluate(node => node.isConnected)).toBe(true);
+  await page.getByRole("button", { name: "移除头像", exact: true }).click();
+  await expect(page.getByText("头像已移除。", { exact: true })).toBeVisible();
+  await expect(page.locator(".avatar-picker img, .sidebar-user .avatar img")).toHaveCount(0);
+});
+
+test("avatar previews can be cancelled or replaced and reject invalid files before uploading", async ({ page }) => {
+  await page.goto("http://localhost/id/account/settings/profile");
+  const input = page.getByLabel("选择头像图片", { exact: true });
+  const file = { name: "avatar.png", mimeType: "image/png", buffer: avatarImage };
+  await input.setInputFiles(file);
+  const previewUrl = await page.locator(".avatar-picker img").getAttribute("src");
+  await input.setInputFiles({ ...file, name: "replacement.png" });
+  await expect(page.locator(".avatar-picker img")).not.toHaveAttribute("src", previewUrl!);
+  await page.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(page.getByRole("img", { name: "所选头像预览", exact: true })).toHaveCount(0);
+  await expect(input).toHaveValue("");
+  await input.setInputFiles(file);
+  await expect(page.getByRole("img", { name: "所选头像预览", exact: true })).toBeVisible();
+  for (const [buffer, mimeType, message] of [
+    [Buffer.alloc(512 * 1024 + 1), "image/png", "头像图片不能超过 512 KiB，请选择较小的图片。"],
+    [Buffer.from("not an image"), "text/plain", "请选择图片文件作为头像。"],
+    [Buffer.alloc(0), "image/png", "请选择有内容的头像图片。"],
+  ] as const) {
+    await input.setInputFiles({ name: "invalid", mimeType, buffer });
+    await expect(page.getByRole("alert")).toHaveText(message);
+    await expect(page.getByRole("button", { name: "保存头像", exact: true })).toHaveCount(0);
+  }
+  const calls = await page.evaluate(async () => (await (await fetch("/id/api/account/test-calls")).json()).calls);
+  expect(calls.filter((call: { path: string }) => call.path === "/me/avatar")).toHaveLength(0);
+});
+
+test("an avatar upload disables editing while pending and keeps the preview for retry on failure", async ({ page }) => {
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/api/account/me/avatar", async route => {
+    await pending;
+    await route.fulfill({ status: 502, contentType: "application/json", body: JSON.stringify({ error: { code: "avatar_upload_failed", message: "头像上传失败，请重试。" } }) });
+  });
+  await page.goto("http://localhost/id/account/settings/profile");
+  await page.getByLabel("选择头像图片", { exact: true }).setInputFiles({ name: "avatar.png", mimeType: "image/png", buffer: avatarImage });
+  await page.getByRole("button", { name: "保存头像", exact: true }).click();
+  try {
+    await expect(page.getByRole("button", { name: "更换头像", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "取消", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "正在处理…", exact: true })).toBeDisabled();
+  } finally { release(); }
+  await expect(page.getByRole("alert")).toContainText("头像上传失败，请重试。");
+  await expect(page.getByRole("img", { name: "所选头像预览", exact: true })).toBeVisible();
+  await page.unroute("**/api/account/me/avatar");
+  await page.getByRole("button", { name: "保存头像", exact: true }).click();
+  await expect(page.getByText("头像已更新。", { exact: true })).toBeVisible();
+});
+
+test("the merged profile preserves the separate email verification flow and unsaved profile fields", async ({ page }) => {
+  await page.goto("http://localhost/id/account/settings/profile");
+  await page.getByLabel("昵称", { exact: true }).fill("未保存的昵称");
+  await page.getByLabel("新邮箱", { exact: true }).fill("new@example.com");
+  await page.getByLabel("当前登录密码", { exact: true }).fill("current-password");
+  await page.getByRole("button", { name: "保存并发送验证邮件", exact: true }).click();
+  await expect(page.getByText("待验证", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "输入验证码", exact: true })).toHaveAttribute("href", "/id/verify-email?userID=user");
+  await expect(page.getByLabel("昵称", { exact: true })).toHaveValue("未保存的昵称");
+  const calls = await page.evaluate(async () => (await (await fetch("/id/api/account/test-calls")).json()).calls);
+  expect(calls.filter((call: { path: string; method: string }) => call.path === "/me" && call.method === "PATCH")).toHaveLength(0);
 });
 
 test("programmatic navigation after deletion invalidates the list without reloading", async ({ page }) => {
