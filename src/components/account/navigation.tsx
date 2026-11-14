@@ -21,7 +21,7 @@ function subscribe(listener: () => void) {
 const pathname = () => window.location.pathname;
 
 export function accountPath(path: string) {
-  return /^\/(apps|settings|help)(\/|$|[?#])/.test(path) ? `/account${path}` : path;
+  return /^\/(apps|settings|help|about)(\/|$|[?#])/.test(path) ? `/account${path}` : path;
 }
 
 /** The portal already loads its data through authenticated APIs. Keep its shell

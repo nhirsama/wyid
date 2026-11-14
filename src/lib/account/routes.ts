@@ -1,5 +1,5 @@
 export function isAccountRoute(route: string) {
-  return ["/apps", "/apps/new", "/settings/profile", "/settings/security", "/settings/devices", "/help"].includes(route) || /^\/apps\/[\w-]{1,200}:[\w-]{1,200}$/.test(route);
+  return ["/apps", "/apps/new", "/settings/profile", "/settings/security", "/settings/devices", "/help", "/about"].includes(route) || /^\/apps\/[\w-]{1,200}:[\w-]{1,200}$/.test(route);
 }
 
 /** Resolve only portal pages; authentication and unknown URLs stay server-owned. */

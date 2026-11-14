@@ -64,7 +64,9 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: ${{ matrix.platform }}
-          build-args: BASE_PATH=${{ vars.BASE_PATH || '/' }}
+          build-args: |
+            BASE_PATH=${{ vars.BASE_PATH || '/' }}
+            APP_VERSION=${{ github.ref_name }}
           outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ steps.image.outputs.name }}:buildcache-${{ matrix.arch }}

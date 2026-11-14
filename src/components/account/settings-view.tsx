@@ -15,7 +15,7 @@ function Profile({ account, onAccount }: { account: Account; onAccount: (value: 
   const profileTask = useTask();
   const emailTask = useTask();
   const [verificationUserId, setVerificationUserId] = useState("");
-  return <Panel title="个人资料" description="管理你的头像、昵称与联系邮箱。">
+  return <Panel title="个人资料" description="管理你的头像、用户名与联系邮箱。">
     <div className="profile-layout">
       <div className="profile-fields">
         <TaskNotice task={profileTask} />
@@ -28,7 +28,7 @@ function Profile({ account, onAccount }: { account: Account; onAccount: (value: 
             onAccount(result.account);
           }, "个人资料已保存。");
         }}>
-          <Field label="昵称"><input name="displayName" autoComplete="nickname" defaultValue={account.displayName} maxLength={200} required /></Field>
+          <Field label="用户名"><input name="displayName" autoComplete="nickname" defaultValue={account.displayName} maxLength={200} required /></Field>
           <Field label="通知语言"><select name="preferredLanguage" defaultValue={account.preferredLanguage}><option value="zh-CN">简体中文</option><option value="en">English</option>{!["zh-CN", "en"].includes(account.preferredLanguage) && <option value={account.preferredLanguage}>{account.preferredLanguage}</option>}</select></Field>
           <Submit busy={profileTask.busy}>保存资料</Submit>
         </form>

@@ -31,7 +31,7 @@ export function LoginForm({ context, policy }: Props) {
     <form method="post" className="form" noValidate onSubmit={form.handleSubmit(input => action.run(() => login(input, context)))}>
       <Feedback result={action.result} />
       <fieldset disabled={action.pending || webauthn.pending} className="form-fieldset">
-        {(policy.password || policy.passkey) && <Field label="邮箱或用户名" registration={form.register("loginName")} error={form.formState.errors.loginName?.message}
+        {(policy.password || policy.passkey) && <Field label="用户名" registration={form.register("loginName")} error={form.formState.errors.loginName?.message}
           autoComplete="username" autoCapitalize="none" spellCheck={false} maxLength={320} />}
         {policy.password && <>
           <Field label="密码" type="password" registration={form.register("password")} error={form.formState.errors.password?.message}

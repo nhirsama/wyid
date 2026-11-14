@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useState } from "react";
-import { BookOpen, Browser, Gear, List, SignOut } from "@phosphor-icons/react";
+import { BookOpen, Browser, Gear, Info, List, SignOut } from "@phosphor-icons/react";
 import { useBrand } from "@/components/auth/brand-provider";
 import { ApiError, clearApiCache, post, readApi } from "@/lib/account/api";
 import type { Account, PublicConfig } from "@/lib/account/types";
@@ -10,6 +10,7 @@ import { AccountLink as Link, AccountNavigationProvider, useAccountRoute, useAcc
 import { ApplicationsView } from "./applications-view";
 import { Avatar } from "./avatar";
 import { HelpView } from "./help-view";
+import { AboutView } from "./about-view";
 import { SettingsView } from "./settings-view";
 import { PageBackdrop } from "@/components/page-backdrop";
 import { Modal, Notice, TaskNotice, useTask } from "./ui";
@@ -18,7 +19,7 @@ import "./account.css";
 const navigation = [
   { href: "/apps", title: "我的应用", icon: Browser },
   { href: "/settings/profile", title: "账号设置", icon: Gear },
-  { href: "/help", title: "接入帮助", icon: BookOpen },
+  { href: "/about", title: "关于", icon: Info },
 ];
 
 type PortalProps = { route: string; initialAccount: Account; config: PublicConfig };
@@ -70,13 +71,13 @@ function Portal({ initialAccount, config }: Omit<PortalProps, "route">) {
     return () => { active = false; window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh); clearApiCache(); };
   }, [initialAccount.id]);
   const selected = (href: string) => href === "/apps" ? route.startsWith("/apps") : href.startsWith("/settings") ? route.startsWith("/settings") : route === href;
-  const section = route.startsWith("/settings") ? "账号设置" : route === "/help" ? "接入帮助" : "我的应用";
+  const section = route.startsWith("/settings") ? "账号设置" : route === "/help" ? "接入帮助" : route === "/about" ? "关于" : "我的应用";
   const nav = <nav aria-label="主导航">{navigation.map(item => <Link key={item.href} href={item.href} className={selected(item.href) ? "selected" : ""} aria-current={selected(item.href) ? "page" : undefined} onClick={() => setMenu(false)}><item.icon size={19} />{item.title}</Link>)}</nav>;
   return <div className="account-ui"><PageBackdrop variant="portal" /><div className="portal">
     <aside className="sidebar"><Link className="brand" href="/apps">{brand.icon && <Image src={brand.icon} width={32} height={36} unoptimized alt="" />}<strong>{brand.nickname}</strong></Link>{nav}<div className="sidebar-user"><Avatar account={account} /><div><strong>{account.displayName}</strong><small>{account.email}</small></div><button className="icon-button" aria-label="退出登录" onClick={() => { task.clear(); setSignout(true); }}><SignOut size={19} /></button></div></aside>
     <div className="main"><header className="topbar"><div><button className="icon-button mobile-menu" aria-label="打开菜单" aria-expanded={menu} onClick={() => setMenu(true)}><List size={21} /></button><strong>{section}</strong></div><Link href="/help"><BookOpen size={16} />接入帮助</Link></header>
       <main className="content" id="main-content">{error && <Notice kind="error">{error.message}{error.loginRequired && <Link href="/account">继续身份验证</Link>}</Notice>}
-        {route.startsWith("/settings") ? <SettingsView key={route} route={route} account={account} onAccount={setAccount} config={config} /> : route === "/help" ? <HelpView issuer={config.issuer} /> : <ApplicationsView key={route} route={route} issuer={config.issuer} />}
+        {route.startsWith("/settings") ? <SettingsView key={route} route={route} account={account} onAccount={setAccount} config={config} /> : route === "/help" ? <HelpView issuer={config.issuer} /> : route === "/about" ? <AboutView /> : <ApplicationsView key={route} route={route} issuer={config.issuer} />}
       </main>
     </div>
     <Modal open={menu} onClose={() => setMenu(false)} title={brand.nickname || "账号门户"} description={`${account.displayName} · ${account.email}`}><div className="mobile-navigation">{nav}</div><button className="small-button" onClick={() => { setMenu(false); task.clear(); setSignout(true); }}><SignOut size={16} />退出登录</button></Modal>
