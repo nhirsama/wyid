@@ -126,6 +126,52 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
+describe("authorization requests stay isolated between websites", () => {
+  const requests = {
+    V2_website_a: { ...authorization, id: "V2_website_a", clientId: "client-a", redirectUri: "https://a.example.com/callback" },
+    V2_website_b: { ...authorization, id: "V2_website_b", clientId: "client-b", redirectUri: "https://b.example.com/callback" },
+  };
+  beforeEach(() => {
+    mocks.authRequest.mockImplementation(async (id: keyof typeof requests) => requests[id]);
+    mocks.callback.mockImplementation(async (id: keyof typeof requests) => `${requests[id].redirectUri}?code=opaque`);
+    mockPendingSession(pendingSession({ authRequestId: "V2_website_b" }));
+  });
+
+  it.each(["password", "remembered session"])("uses website A's explicit request during %s login, not the stale B cookie", async method => {
+    if (method === "remembered session") mocks.readAuthenticatedSession.mockResolvedValue({ sessionId: "session-id", sessionToken: "session-token", userId: "user-id" });
+    const ctx = { authRequestId: "V2_website_a" };
+    const result = method === "password" ? await login(credentials, ctx) : await resumeLogin(ctx);
+    expect(result).toEqual({ ok: true, redirect: "https://a.example.com/callback?code=opaque" });
+    expect(mocks.callback).toHaveBeenCalledWith("V2_website_a", expect.any(Object));
+    expect(mocks.callback).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a website A MFA submission after the shared cookie switches to B", async () => {
+    expect(await verifyFactor({ method: "totp", code: "123456" }, { authRequestId: "V2_website_a" })).toMatchObject({ ok: false });
+    expect(mocks.verifyFactor).not.toHaveBeenCalled();
+    expectNoAuthentication();
+  });
+
+  it("rejects website A's consent instead of authorizing website B", async () => {
+    expect(await decideConsent({ authRequestId: "V2_website_a", consentToken: "stale-approval", allow: true })).toMatchObject({ ok: false });
+    expect(mocks.deny).not.toHaveBeenCalled();
+    expectNoAuthentication();
+  });
+
+  it("keeps existing cookies intact when starting an IDP or password login fails upstream", async () => {
+    mocks.policy.mockResolvedValue({ ...policy, identityProviders: [{ id: "idp", name: "Example IDP", creationAllowed: true, autoCreation: false }] });
+    mocks.startIdp.mockRejectedValueOnce({ code: 14 });
+    expect((await chooseIdentityProvider({ id: "idp" }, { authRequestId: "V2_website_a" })).ok).toBe(false);
+    expect(mocks.clearAuthenticatedSession).not.toHaveBeenCalled();
+    expect(mocks.clearPendingSession).not.toHaveBeenCalled();
+    expect(mocks.writePendingSession).not.toHaveBeenCalled();
+
+    mocks.createSession.mockRejectedValueOnce({ code: 16 });
+    expect(await login(credentials, { authRequestId: "V2_website_a" })).toMatchObject({ ok: false, message: "账号或密码错误" });
+    expect(mocks.clearAuthenticatedSession).not.toHaveBeenCalled();
+    expect(mocks.clearPendingSession).not.toHaveBeenCalled();
+  });
+});
 describe("reuse of live ZITADEL login sessions", () => {
   const remembered = { sessionId: "session-id", sessionToken: "remembered-token", userId: "user-id", mfaStartedAt: 1 };
   beforeEach(() => {

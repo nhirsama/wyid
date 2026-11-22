@@ -80,6 +80,27 @@ describe("login presentation is independent of the authorization entry point", (
     expect(mocks.deny).not.toHaveBeenCalled();
   });
 
+  it.each([{}, { authRequest: "V2_test" }])("shows an IDP failure instead of automatically resuming login for %j", async params => {
+    mocks.session.mockResolvedValue({ sessionId: "secret-id", sessionToken: "secret-token", userId: "user-id" });
+    const html = renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve({ ...params, idpError: "1" }) }));
+    expect(html).toContain("身份提供方登录未完成");
+    expect(html).toContain("login-form");
+    expect(html).not.toContain("resume-login");
+    expect(mocks.resume).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["unlinked", "此身份提供方尚未关联账号，且当前组织不允许自动创建账号。"],
+    ["disabled", "此身份提供方登录方式当前不可用，请选择其他登录方式。"],
+    ["unexpected", "身份提供方登录未完成，请重试或选择其他登录方式。"],
+  ])("maps idpError=%s to a safe allowlisted notice without resuming login", async (code, message) => {
+    mocks.session.mockResolvedValue({ sessionId: "secret-id", sessionToken: "secret-token", userId: "user-id" });
+    const html = renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve({ idpError: code }) }));
+    expect(html).toContain(message);
+    expect(html).toContain("login-form");
+    expect(html).not.toContain("resume-login");
+  });
+
   it.each([
     { prompt: [Prompt.LOGIN] }, { prompt: [Prompt.SELECT_ACCOUNT] }, { prompt: [Prompt.CREATE] }, { maxAge: { seconds: 0n } },
   ])("keeps interactive login when requested by ZITADEL (case %#)", async overrides => {

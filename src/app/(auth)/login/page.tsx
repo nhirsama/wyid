@@ -12,10 +12,19 @@ import { ResumeLoginForm } from "@/components/auth/resume-login-form";
 import { readAuthenticatedSession } from "@/server/session";
 import { requiresFreshLogin } from "@/server/authentication";
 
+const idpErrorMessages: Record<string, string> = {
+  "1": "身份提供方登录未完成，请重试或选择其他登录方式。",
+  unlinked: "此身份提供方尚未关联账号，且当前组织不允许自动创建账号。",
+  disabled: "此身份提供方登录方式当前不可用，请选择其他登录方式。",
+};
+
 export const metadata = { title: "登录" };
 export default async function LoginPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
   const context = authContext(params);
+  const rawIdpError = typeof params.idpError === "string" ? params.idpError : "";
+  const idpError = rawIdpError ? idpErrorMessages[rawIdpError] || idpErrorMessages["1"] : undefined;
+  const idpFailed = Boolean(idpError);
   const panel = { title: "登录账号", description: "一个账号，连接你的网站。" };
   let request: Awaited<ReturnType<typeof zitadel.authRequest>> | undefined;
   let policy: LoginPolicy | undefined;
@@ -26,7 +35,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     request = context.authRequestId ? await zitadel.authRequest(context.authRequestId) : undefined;
     // Only expose flow context to the client, never the encrypted Session
     // credential. The POST action rechecks all live ZITADEL requirements.
-    reuse = !requiresFreshLogin(request) && !!await readAuthenticatedSession();
+    // A failed/stale IDP return needs an explicit retry, not another automatic
+    // authorization using a session completed in a different tab.
+    reuse = !idpFailed && !requiresFreshLogin(request) && !!await readAuthenticatedSession();
     if (!reuse && request?.prompt.includes(Prompt.NONE)) {
       callbackUrl = await zitadel.deny(request.id, ErrorReason.LOGIN_REQUIRED);
     } else if (!reuse) {
@@ -49,7 +60,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   </AuthPanel>;
   const initialContext = { ...context, loginHint: context.loginHint || request?.loginHint };
   return <AuthPanel {...panel}>
-    {params.idpError === "1" && <Notice kind="error">身份提供方登录未完成，请重试或选择其他登录方式。</Notice>}
+    {idpError && <Notice kind="error">{idpError}</Notice>}
     <LoginForm context={initialContext} policy={policy} />
   </AuthPanel>;
 }

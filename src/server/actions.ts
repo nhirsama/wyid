@@ -134,12 +134,6 @@ export async function decideConsent(raw: unknown): Promise<ActionResult> {
 }
 type PrimaryLoginInput = { loginName: string; password: string; passkey?: false } | { passkey: true; loginName?: string; userId?: string; chooseAccount?: boolean };
 async function beginLogin(input: PrimaryLoginInput, ctx: ReturnType<typeof context>): Promise<PasskeyChallengeResult> {
-  const previous = await readPendingSession();
-  if (previous?.passkeyPending && previous.sessionId && previous.sessionToken) {
-    try { await zitadel.deleteSession(previous); } catch { /* A stale challenge must not block a new login. */ }
-  }
-  await clearPendingSession();
-  await clearAuthenticatedSession();
   const auth = ctx.authRequestId ? await zitadel.authRequest(ctx.authRequestId) : undefined;
   if (auth?.prompt.includes(Prompt.NONE)) return { ok: true, redirect: await zitadel.deny(auth.id, ErrorReason.LOGIN_REQUIRED) };
   const policy = await zitadel.policy(await zitadel.organizationForAuth(ctx.authRequestId));
@@ -176,11 +170,19 @@ async function beginLogin(input: PrimaryLoginInput, ctx: ReturnType<typeof conte
     if (!input.passkey && (code === 5 || code === 16)) return { ...actionError(error), message: "账号或密码错误" };
     throw error;
   }
+  const previous = await readPendingSession();
+  if (previous?.passkeyPending && previous.sessionId && previous.sessionToken) {
+    try { await zitadel.deleteSession(previous); } catch { /* A stale challenge must not block a new login. */ }
+  }
+  await clearAuthenticatedSession();
   const pending = { sessionId: created.sessionId, sessionToken: created.sessionToken, authRequestId: auth?.id, mfaStartedAt };
   if (input.passkey) {
-    await writePendingSession({ ...pending, passkeyPending: true });
     const options = created.challenges?.webAuthN?.publicKeyCredentialRequestOptions;
-    if (!options) throw new AuthError("ZITADEL 未返回通行密钥挑战，请检查账号是否已登记通行密钥。");
+    if (!options) {
+      await clearPendingSession();
+      throw new AuthError("ZITADEL 未返回通行密钥挑战，请检查账号是否已登记通行密钥。");
+    }
+    await writePendingSession({ ...pending, passkeyPending: true });
     return { ok: true, options: options as Record<string, unknown> };
   }
   return await finishOrFactor(pending);
@@ -470,14 +472,15 @@ export async function chooseIdentityProvider(raw: unknown, rawContext: AuthConte
     const policy = await zitadel.policy(organizationId);
     if (!policy.identityProviders.some(item => item.id === id)) throw new AuthError("此登录方式当前不可用。");
     const state = crypto.randomUUID();
-    await clearAuthenticatedSession();
-    await clearPendingSession();
     const response = await zitadel.startIdp(id, state);
-    await writePendingSession({ authRequestId: ctx.authRequestId, sessionId: "", sessionToken: "", methods: [], userId: "", idpState: state, idpId: id, idpOrganizationId: organizationId || "" });
     const next = response.nextStep;
-    if (next.case === "authUrl") return { ok: true, redirect: next.value };
-    if (next.case === "formData") return { ok: true, form: { action: new URL(next.value.url).toString(), fields: next.value.fields } };
-    throw new AuthError("身份提供方没有返回可用的登录地址。");
+    let result: ActionResult;
+    if (next.case === "authUrl") result = { ok: true, redirect: next.value };
+    else if (next.case === "formData") result = { ok: true, form: { action: new URL(next.value.url).toString(), fields: next.value.fields } };
+    else throw new AuthError("身份提供方没有返回可用的登录地址。");
+    await clearAuthenticatedSession();
+    await writePendingSession({ authRequestId: ctx.authRequestId, sessionId: "", sessionToken: "", methods: [], userId: "", idpState: state, idpId: id, idpOrganizationId: organizationId || "" });
+    return result;
   } catch (error) { return actionError(error); }
 }
 
