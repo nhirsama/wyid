@@ -57,6 +57,26 @@ describe("native application ownership", () => {
     expect(mocks.bootstrap.addProject).not.toHaveBeenCalled();
     expect(mocks.user.getAppByID).not.toHaveBeenCalled();
   });
+  it("reuses an existing project with PROJECT_OWNER_GLOBAL membership instead of bootstrapping", async () => {
+    mocks.bootstrap.listUserMemberships.mockResolvedValue({ result: [membership("public-project", ["PROJECT_OWNER_GLOBAL"])] });
+    const result = await new Applications(identityFixture()).create(input);
+    expect(result.application.id).toBe("public-project:new-app");
+    expect(mocks.user.addOIDCApp).toHaveBeenCalledWith(expect.objectContaining({ projectId: "public-project" }));
+    expect(mocks.bootstrap.addProject).not.toHaveBeenCalled();
+    expect(mocks.bootstrap.addProjectMember).not.toHaveBeenCalled();
+  });
+  it("keeps preferring an existing PROJECT_OWNER project over a PROJECT_OWNER_GLOBAL project", async () => {
+    mocks.bootstrap.listUserMemberships.mockResolvedValue({ result: [membership("a-global", ["PROJECT_OWNER_GLOBAL"]), membership("z-owner")] });
+    const result = await new Applications(identityFixture()).create(input);
+    expect(result.application.id).toBe("z-owner:new-app");
+    expect(mocks.bootstrap.addProject).not.toHaveBeenCalled();
+  });
+  it("does not select a global viewer or a global owner membership from another organization", async () => {
+    mocks.bootstrap.listUserMemberships.mockResolvedValue({ result: [membership("viewer", ["PROJECT_OWNER_VIEWER_GLOBAL"]), membership("other-project", ["PROJECT_OWNER_GLOBAL"], "other-org")] });
+    mocks.bootstrap.addProject.mockResolvedValue({ id: "new-project" });
+    const result = await new Applications(identityFixture()).create(input);
+    expect(result.application.id).toBe("new-project:new-app");
+  });
   it("bootstraps a per-user native project with PROJECT_OWNER membership", async () => {
     mocks.bootstrap.listUserMemberships.mockResolvedValue({ result: [] });
     mocks.bootstrap.addProject.mockResolvedValue({ id: "new-project" });

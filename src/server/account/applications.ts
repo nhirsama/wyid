@@ -6,7 +6,7 @@ import type { Application, ApplicationInput } from "@/lib/account/types";
 import { siteUrl } from "@/lib/paths";
 import { getConfig } from "@/server/config";
 import { getOrganizationClients, getUserClients } from "@/server/zitadel/sdk";
-import { assert } from "./errors";
+import { ApplicationRpcError, assert, type ApplicationRpc } from "./errors";
 import { isoDate, type Identity } from "./identity";
 
 export function applicationIds(id: string) {
@@ -34,6 +34,14 @@ export function appConfig(input: ApplicationInput) {
   };
 }
 
+async function applicationRpc<T>(rpc: ApplicationRpc, call: () => Promise<T>): Promise<T> {
+  try { return await call(); }
+  catch (error) {
+    if (error instanceof ConnectError) throw new ApplicationRpcError(rpc, error);
+    throw error;
+  }
+}
+
 export class Applications {
   private user;
   private bootstrap;
@@ -44,14 +52,19 @@ export class Applications {
   private async memberships() {
     const memberships = [];
     for (let offset = 0n; ;) {
-      const page = await this.bootstrap.listUserMemberships({ userId: this.identity.ref.userId, query: { offset, limit: 100 } });
+      const page = await applicationRpc("ListUserMemberships", () => this.bootstrap.listUserMemberships({ userId: this.identity.ref.userId, query: { offset, limit: 100 } }));
       memberships.push(...page.result.filter(item => item.userId === this.identity.ref.userId && item.details?.resourceOwner === this.identity.organizationId && item.type.case === "projectId"));
       offset += BigInt(page.result.length);
       if (!page.result.length || offset >= (page.details?.totalResult ?? offset)) return memberships;
     }
   }
   private async ownedProject() {
-    return (await this.memberships()).filter(item => item.roles.includes("PROJECT_OWNER")).map(item => item.type.case === "projectId" ? item.type.value : "").filter(Boolean).sort()[0];
+    const memberships = await this.memberships();
+    // Keep the existing project choice for users who already have PROJECT_OWNER.
+    for (const role of ["PROJECT_OWNER", "PROJECT_OWNER_GLOBAL"]) {
+      const id = memberships.flatMap(item => item.type.case === "projectId" && item.type.value && item.roles.includes(role) ? [item.type.value] : []).sort()[0];
+      if (id) return id;
+    }
   }
   private async ensureProject() {
     const existing = await this.ownedProject();
@@ -60,16 +73,17 @@ export class Applications {
     try {
       project = await this.bootstrap.addProject({ name: `wyid - ${this.identity.ref.userId}`, projectRoleAssertion: false, projectRoleCheck: false, hasProjectCheck: false });
     } catch (error) {
-      if (!(error instanceof ConnectError) || error.code !== Code.AlreadyExists) throw error;
+      if (!(error instanceof ConnectError)) throw error;
+      if (error.code !== Code.AlreadyExists) throw new ApplicationRpcError("AddProject", error);
       for (const wait of [0, 50, 150, 300, 500]) {
         if (wait) await delay(wait);
         const id = await this.ownedProject();
         if (id) return id;
       }
-      throw error;
+      throw new ApplicationRpcError("AddProject", error);
     }
     assert(project.id, 502, "invalid_response", "身份服务未返回项目标识。");
-    await this.bootstrap.addProjectMember({ projectId: project.id, userId: this.identity.ref.userId, roles: ["PROJECT_OWNER"] });
+    await applicationRpc("AddProjectMember", () => this.bootstrap.addProjectMember({ projectId: project.id, userId: this.identity.ref.userId, roles: ["PROJECT_OWNER"] }));
     return project.id;
   }
   async list() {
@@ -77,7 +91,7 @@ export class Applications {
     const result: Application[] = [];
     for (const projectId of ids) {
       for (let offset = 0n; ;) {
-        const page = await this.user.listApps({ projectId, query: { offset, limit: 100 } });
+        const page = await applicationRpc("ListApps", () => this.user.listApps({ projectId, query: { offset, limit: 100 } }));
         result.push(...page.result.filter(app => app.config.case === "oidcConfig").map(app => publicApplication(projectId, app)));
         offset += BigInt(page.result.length);
         if (!page.result.length || offset >= (page.details?.totalResult ?? offset)) break;
@@ -96,7 +110,7 @@ export class Applications {
   async get(id: string) { const { projectId, app } = await this.raw(id); return publicApplication(projectId, app); }
   async create(input: ApplicationInput) {
     const projectId = await this.ensureProject();
-    const result = await this.user.addOIDCApp({ projectId, name: input.name, ...appConfig(input) });
+    const result = await applicationRpc("AddOIDCApp", () => this.user.addOIDCApp({ projectId, name: input.name, ...appConfig(input) }));
     assert(result.appId && result.clientId, 502, "invalid_response", "身份服务未返回完整应用标识。");
     const app = create(AppSchema, { id: result.appId, name: input.name, state: AppState.ACTIVE, details: result.details, config: { case: "oidcConfig", value: { ...appConfig(input), clientId: result.clientId } } });
     return { application: publicApplication(projectId, app), ...(result.clientSecret ? { clientSecret: result.clientSecret } : {}) };

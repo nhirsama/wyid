@@ -4,7 +4,7 @@ import { getConfig } from "@/server/config";
 import { actionError } from "@/server/errors";
 import { clearAccountGrant, clearAuthenticatedSession, clearPendingSession, readAuthenticatedSession } from "@/server/session";
 import { zitadel } from "@/server/zitadel/service";
-import { AccountError, assert } from "./errors";
+import { AccountError, ApplicationRpcError, assert } from "./errors";
 import { accountIdentity, accountProfile } from "./identity";
 import { Applications } from "./applications";
 import { avatarFile } from "./avatar";
@@ -108,8 +108,9 @@ export async function handleAccountRequest(request: Request, path: string[]) {
     throw new AccountError(404, "not_found", "请求的功能不存在。");
   } catch (error) {
     if (error instanceof AccountError) return json({ error: { code: error.code, message: error.message } }, error.status);
-    const result = actionError(error);
-    const status = error instanceof ConnectError ? error.code === Code.PermissionDenied ? 403 : error.code === Code.Unauthenticated ? 401 : error.code === Code.NotFound ? 404 : error.code === Code.AlreadyExists ? 409 : 502 : 500;
+    const upstream = error instanceof ApplicationRpcError ? error.upstream : error;
+    const result = actionError(upstream, error instanceof ApplicationRpcError ? { rpc: error.rpc, actor: error.actor } : undefined);
+    const status = upstream instanceof ConnectError ? upstream.code === Code.PermissionDenied ? 403 : upstream.code === Code.Unauthenticated ? 401 : upstream.code === Code.NotFound ? 404 : upstream.code === Code.AlreadyExists ? 409 : 502 : 500;
     return json({ error: { code: status === 401 ? "authentication_required" : "request_failed", message: result.message, requestId: result.requestId } }, status);
   }
 }

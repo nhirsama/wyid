@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { ConnectError } from "@connectrpc/connect";
+import { ErrorDetailSchema } from "@zitadel/proto/zitadel/message_pb.js";
 import { ZodError } from "zod";
 import type { ActionResult } from "@/lib/auth";
 import { ConfigurationError } from "./config";
@@ -8,14 +10,17 @@ export class AuthError extends Error {
   constructor(message: string) { super(message); this.name = "AuthError"; }
 }
 
-export function actionError(error: unknown): Extract<ActionResult, { ok: false }> {
+export function actionError(error: unknown, context?: { rpc: string; actor: string }): Extract<ActionResult, { ok: false }> {
   if (error instanceof AuthError || error instanceof ConfigurationError) return { ok: false, message: error.message };
   if (error instanceof ZodError) return { ok: false, message: "提交的信息不完整或格式有误，请检查后重试。" };
   const requestId = randomUUID();
   const grpcCode = error && typeof error === "object" && "code" in error ? error.code : undefined;
   const callbackFailure = classifyCallbackError(error);
+  const zitadelErrorId = context && error instanceof ConnectError
+    ? error.findDetails(ErrorDetailSchema).find(detail => /^[A-Z]{2,16}-[A-Za-z0-9]{1,16}$/.test(detail.id))?.id
+    : undefined;
   // 不记录完整 SDK 错误对象，它可能包含请求、密码、验证码和凭据。
-  console.error("[auth] request failed", { requestId, code: typeof grpcCode === "number" ? grpcCode : undefined });
+  console.error("[auth] request failed", { requestId, code: typeof grpcCode === "number" ? grpcCode : undefined, ...context, ...(zitadelErrorId ? { zitadelErrorId } : {}) });
   const message = callbackFailure === "request-handled" ? "此授权请求已处理，请回到应用重新发起登录。"
     : callbackFailure === "request-missing" ? "授权请求已失效，请回到应用重新发起登录。"
     : callbackFailure === "organization-mismatch" ? "当前账号不属于应用要求的组织，请使用正确的账号重新登录。"
