@@ -5,7 +5,7 @@ import { useState } from "react";
 import { avatarSource } from "@/lib/account/avatar";
 import type { Account } from "@/lib/account/types";
 
-export function Avatar({ account, size = 33, previewUrl }: { account: Pick<Account, "displayName" | "email" | "avatarUrl">; size?: number; previewUrl?: string }) {
+export function Avatar({ account, size = 36, previewUrl }: { account: Pick<Account, "displayName" | "email" | "avatarUrl">; size?: number; previewUrl?: string }) {
   const [failedUrl, setFailedUrl] = useState("");
   const src = previewUrl || avatarSource(account.avatarUrl);
   const name = account.displayName || account.email;

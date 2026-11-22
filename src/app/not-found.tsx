@@ -7,7 +7,7 @@ export default function NotFound() {
   return (
     <main className="auth-page not-found-page" id="main-content">
       <AppLink className="auth-brand" href="/">
-        {brand.icon && <Image src={brand.icon} alt="" width={36} height={40} priority unoptimized />}
+        {brand.icon && <Image src={brand.icon} alt="" width={36} height={36} priority unoptimized />}
         <strong>{brand.nickname}</strong>
       </AppLink>
       <section className="not-found" aria-labelledby="not-found-title">

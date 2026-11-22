@@ -15,11 +15,10 @@ const motifs = {
 } as const;
 
 type Kind = keyof typeof motifs;
-// [图案, 水平位置, 垂直位置(%), 宽度(px), 旋转(deg), 颜色, 额外类]
-// 登录页水平位置为相对页面中线的 px；门户为视口宽度的 %。
+// [图案, 相对页面中线的水平偏移(px), 垂直位置(%), 宽度(px), 旋转(deg), 颜色, 额外类]
 type Item = [Kind, number, number, number, number, "blue" | "pink", string?];
 
-const auth: Item[] = [
+const wide: Item[] = [
   ["wave", -560, 14, 46, -10, "blue", "outer"],
   ["ring", -385, 22, 16, 0, "pink"],
   ["dots", -620, 41, 22, 0, "blue", "outer"],
@@ -36,7 +35,7 @@ const auth: Item[] = [
   ["plus", 335, 84, 14, 0, "blue"],
 ];
 
-const authNarrow: Item[] = [
+const narrow: Item[] = [
   ["ring", -140, 5, 14, 0, "pink"],
   ["wave", -60, 9, 34, -8, "blue"],
   ["sparkle", 130, 6, 18, 0, "blue"],
@@ -45,33 +44,17 @@ const authNarrow: Item[] = [
   ["dots", 140, 92, 18, 0, "blue"],
 ];
 
-// 门户内容区较宽，只在边缘与留白处点缀少量图案，白色卡片会自然遮住其后的部分。
-const portal: Item[] = [
-  ["sparkle", 97.5, 9, 18, 0, "pink"],
-  ["wave", 93, 4.5, 38, 10, "blue"],
-  ["ring", 98, 46, 14, 0, "blue"],
-  ["zigzag", 96, 74, 26, -8, "pink"],
-  ["dots", 92, 93, 20, 0, "blue"],
-  ["plus", 6, 95, 12, 0, "blue", "outer"],
-  ["arc", 14, 97, 24, -10, "pink", "outer"],
-];
-
-function Motif({ item: [kind, x, y, width, rotate, color, extra], className, mode }: { item: Item; className: string; mode: "center" | "edge" }) {
+function Motif({ item: [kind, x, y, width, rotate, color, extra], className }: { item: Item; className: string }) {
   const [viewBox, shape] = motifs[kind];
-  const style = { "--x": mode === "center" ? `${x}px` : `${x}%`, "--y": `${y}%`, "--w": `${width}px`, "--r": `${rotate}deg` } as CSSProperties;
+  const style = { "--x": `${x}px`, "--y": `${y}%`, "--w": `${width}px`, "--r": `${rotate}deg` } as CSSProperties;
   return <span className={["motif", color, extra, className].filter(Boolean).join(" ")} style={style}>
     <svg viewBox={viewBox} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{shape}</svg>
   </span>;
 }
 
-export function PageBackdrop({ variant = "auth" }: { variant?: "auth" | "portal" }) {
-  if (variant === "portal") {
-    return <div className="page-backdrop portal-backdrop" aria-hidden="true">
-      {portal.map((item, index) => <Motif key={index} item={item} className="motif-edge" mode="edge" />)}
-    </div>;
-  }
+export function PageBackdrop() {
   return <div className="page-backdrop" aria-hidden="true">
-    {auth.map((item, index) => <Motif key={index} item={item} className="motif-wide" mode="center" />)}
-    {authNarrow.map((item, index) => <Motif key={`n${index}`} item={item} className="motif-narrow" mode="center" />)}
+    {wide.map((item, index) => <Motif key={index} item={item} className="motif-wide" />)}
+    {narrow.map((item, index) => <Motif key={`n${index}`} item={item} className="motif-narrow" />)}
   </div>;
 }

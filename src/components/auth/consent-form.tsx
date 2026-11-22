@@ -30,8 +30,8 @@ function ConsentAvatar({ displayName, email, avatarUrl }: Pick<Props, "displayNa
   const [failedUrl, setFailedUrl] = useState("");
   const src = avatarSource(avatarUrl);
   const name = displayName || email;
-  return <span className={styles.avatar} role="img" aria-label={`${name}的头像`} style={{ width: 31, height: 31, overflow: "hidden", flex: "none" }}>
-    {src && src !== failedUrl ? <img src={src} alt="" width={31} height={31} style={{ width: "100%", height: "100%", objectFit: "cover" }} referrerPolicy="no-referrer" onError={() => setFailedUrl(src)} /> : Array.from(name)[0]?.toUpperCase() || "?"}
+  return <span className={styles.avatar} role="img" aria-label={`${name}的头像`} style={{ width: 36, height: 36, overflow: "hidden", flex: "none" }}>
+    {src && src !== failedUrl ? <img src={src} alt="" width={36} height={36} style={{ width: "100%", height: "100%", objectFit: "cover" }} referrerPolicy="no-referrer" onError={() => setFailedUrl(src)} /> : Array.from(name)[0]?.toUpperCase() || "?"}
   </span>;
 }
 

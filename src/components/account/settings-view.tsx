@@ -7,7 +7,7 @@ import { Desktop, SignOut } from "@phosphor-icons/react";
 import { api, cachedApiData, post, readApi } from "@/lib/account/api";
 import type { Account, Device, PublicConfig } from "@/lib/account/types";
 import { AuthenticationSettings } from "./authentication-settings";
-import { PasswordHint } from "./password-hint";
+import { passwordPolicyHint } from "./password-hint";
 import { AvatarSettings } from "./avatar-settings";
 import { Field, Loading, Modal, Notice, Panel, Password, Submit, TaskNotice, Title, formValue, formatDate, useTask } from "./ui";
 
@@ -61,7 +61,7 @@ function Profile({ account, onAccount }: { account: Account; onAccount: (value: 
 
 function Security({ config }: { config: PublicConfig }) {
   const passwordTask = useTask();
-  return <><Panel title="修改密码"><TaskNotice task={passwordTask} /><form method="post" className="form settings-form" onSubmit={e => { e.preventDefault(); const form = e.currentTarget; const data = { currentPassword: formValue(form, "currentPassword"), password: formValue(form, "password") }; if (data.password !== formValue(form, "confirm")) { passwordTask.run(async () => { throw new Error("两次输入的密码不一致。"); }); return; } passwordTask.run(async () => { await post("/me/password", data); form.reset(); }, "密码已更新。"); }}><Field label="当前密码"><Password name="currentPassword" /></Field><Field label="新密码"><Password autoComplete="new-password" /></Field><PasswordHint policy={config.passwordPolicy} /><Field label="确认新密码"><Password name="confirm" autoComplete="new-password" /></Field><div className="form-links"><Link href="/forgot-password" className="text-link">找回密码</Link></div><Submit busy={passwordTask.busy}>更新密码</Submit></form></Panel><AuthenticationSettings /></>;
+  return <><Panel title="修改密码"><TaskNotice task={passwordTask} /><form method="post" className="form settings-form" onSubmit={e => { e.preventDefault(); const form = e.currentTarget; const data = { currentPassword: formValue(form, "currentPassword"), password: formValue(form, "password") }; if (data.password !== formValue(form, "confirm")) { passwordTask.run(async () => { throw new Error("两次输入的密码不一致。"); }); return; } passwordTask.run(async () => { await post("/me/password", data); form.reset(); }, "密码已更新。"); }}><Field label="当前密码"><Password name="currentPassword" /></Field><Field label="新密码" hint={passwordPolicyHint(config.passwordPolicy)}><Password autoComplete="new-password" /></Field><Field label="确认新密码"><Password name="confirm" autoComplete="new-password" /></Field><div className="form-links"><Link href="/forgot-password" className="text-link">找回密码</Link></div><Submit busy={passwordTask.busy}>更新密码</Submit></form></Panel><AuthenticationSettings /></>;
 }
 
 function Devices() {

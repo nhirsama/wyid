@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { getBrand } from "@/server/brand";
 import { BrandProvider } from "@/components/auth/brand-provider";
+import { PageBackdrop } from "@/components/page-backdrop";
 import { runtimeBasePath } from "@/lib/paths";
 import "./globals.css";
 
@@ -24,6 +25,6 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/lxgwwenkai-regular.css" />
       <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.2.8/latin-400.css" />
     </head>
-    <body><BrandProvider brand={getBrand()} basePath={basePath}><a href="#main-content" className="skip-link">跳到主要内容</a>{children}</BrandProvider></body>
+    <body><BrandProvider brand={getBrand()} basePath={basePath}><a href="#main-content" className="skip-link">跳到主要内容</a><PageBackdrop />{children}</BrandProvider></body>
   </html>;
 }

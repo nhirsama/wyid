@@ -33,9 +33,15 @@ export function AboutView() {
         <p>版本号：<code>v{appVersion}</code></p>
       </div>
     </Panel>
-    <Panel title="开源协议" description="本项目使用的 SDK 与直接运行时依赖。感谢以下开源项目。">
-      <div className="prose"><p><AppLink href="/third-party-notices.txt" target="_blank" rel="noopener noreferrer">查看完整第三方开源协议与版权声明</AppLink></p></div>
-      <div className="table-wrap">
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <h2>开源协议</h2>
+          <p>本项目使用的 SDK 与直接运行时依赖。感谢以下开源项目。</p>
+        </div>
+        <AppLink className="small-button" href="/third-party-notices.txt" target="_blank" rel="noopener noreferrer">完整版权声明</AppLink>
+      </div>
+      <div className="table-wrap panel-table">
         <table className="data-table">
           <thead><tr><th scope="col">组件</th><th scope="col">版本</th><th scope="col">开源协议</th></tr></thead>
           <tbody>{openSource.map(({ name, license }) => <tr key={name}>
@@ -45,6 +51,6 @@ export function AboutView() {
           </tr>)}</tbody>
         </table>
       </div>
-    </Panel>
+    </section>
   </>;
 }

@@ -2,12 +2,13 @@
 
 import { cloneElement, isValidElement, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Check, Copy, Eye, EyeSlash, SpinnerGap, WarningCircle, X } from "@phosphor-icons/react";
+import { Check, CheckCircle, Copy, Eye, EyeSlash, Info, SpinnerGap, WarningCircle, X } from "@phosphor-icons/react";
 import { AccountLink as Link } from "./navigation";
 import { ApiError } from "@/lib/account/api";
 
 export function Notice({ children, kind = "info" }: { children: ReactNode; kind?: "info" | "error" | "success" }) {
-  return <div className={`notice ${kind}`} role={kind === "error" ? "alert" : "status"}>{kind === "error" && <WarningCircle size={18} />}<div>{children}</div></div>;
+  const Icon = kind === "error" ? WarningCircle : kind === "success" ? CheckCircle : Info;
+  return <div className={`notice ${kind}`} role={kind === "error" ? "alert" : "status"}><Icon size={18} aria-hidden="true" /><div>{children}</div></div>;
 }
 export function Loading({ text = "正在读取…" }: { text?: string }) {
   return <div className="loading" role="status"><SpinnerGap size={23} className="spin" /><span>{text}</span></div>;
@@ -40,7 +41,7 @@ export function CopyValue({ label, value, secret = false }: { label: string; val
   const [error, setError] = useState(false);
   const [revealed, setRevealed] = useState(!secret);
   useEffect(() => { if (copied) { const timer = setTimeout(() => setCopied(false), 1800); return () => clearTimeout(timer); } }, [copied]);
-  return <div className="copy-field"><span>{label}</span><div><code>{revealed ? value : "••••••••••••••••••••••••"}</code>{secret && <button className="icon-button" aria-label={revealed ? "隐藏密钥" : "显示密钥"} onClick={() => setRevealed(!revealed)}>{revealed ? <EyeSlash size={17} /> : <Eye size={17} />}</button>}<button className="icon-button" aria-label={`复制 ${label}`} title={copied ? "已复制" : "复制"} onClick={async () => { try { await navigator.clipboard.writeText(value); setCopied(true); setError(false); } catch { setError(true); } }}>{copied ? <Check size={17} /> : <Copy size={17} />}</button></div>{copied && <small role="status">已复制</small>}{error && <small role="alert">复制失败，请选中文字手动复制。</small>}</div>;
+  return <div className="copy-field"><div className="copy-field-label"><span>{label}</span>{copied && <small role="status">已复制</small>}</div><div className="copy-field-value"><code>{revealed ? value : "••••••••••••••••••••••••"}</code>{secret && <button className="icon-button" aria-label={revealed ? "隐藏密钥" : "显示密钥"} onClick={() => setRevealed(!revealed)}>{revealed ? <EyeSlash size={17} /> : <Eye size={17} />}</button>}<button className="icon-button" aria-label={`复制 ${label}`} title={copied ? "已复制" : "复制"} onClick={async () => { try { await navigator.clipboard.writeText(value); setCopied(true); setError(false); } catch { setError(true); } }}>{copied ? <Check size={17} /> : <Copy size={17} />}</button></div>{error && <small role="alert">复制失败，请选中文字手动复制。</small>}</div>;
 }
 export function CodeBlock({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);

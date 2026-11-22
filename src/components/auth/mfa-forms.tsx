@@ -135,7 +135,7 @@ export function MfaVerificationForm({ context, methods: availableMethods }: MfaP
       </fieldset>
     </form> : <>
       <p className="body-copy">使用已绑定的安全密钥进行验证。</p>
-      <button className="button primary-button" type="button" disabled={action.pending} onClick={verifyKey}>
+      <button className="button primary-button wide" type="button" disabled={action.pending} onClick={verifyKey}>
         <Key size={20} />验证安全密钥
       </button>
     </>}
