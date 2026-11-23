@@ -7,7 +7,7 @@ const fixture = `
 import { createRoot } from "react-dom/client";
 import { BrandProvider } from "@/components/auth/brand-provider";
 import { AccountPortal } from "@/components/account/portal";
-const account = { id: "user", displayName: "测试账号", givenName: "Given", familyName: "Family", email: "user@example.com", emailVerified: true, preferredLanguage: "zh-CN" };
+const account = { id: "user", username: "test-user", displayName: "测试账号", givenName: "Given", familyName: "Family", email: "user@example.com", emailVerified: true, preferredLanguage: "zh-CN" };
 const config = { configured: true, missing: [], issuer: "https://id.example.com", loginMethods: { password: true, registration: true, passkey: true }, passwordPolicy: { minLength: 8, hasUppercase: true, hasLowercase: true, hasNumber: true, hasSymbol: false } };
 const basePath = document.documentElement.dataset.basePath || "";
 createRoot(document.getElementById("root")).render(<BrandProvider brand={{ nickname: "Test ID" }} basePath={basePath}><AccountPortal route={window.location.pathname.slice((basePath + "/account").length)} initialAccount={account} config={config} /></BrandProvider>);
@@ -37,11 +37,11 @@ test.beforeAll(async () => {
   const css = readFileSync("src/app/globals.css", "utf8") + output.filter((item: { type: string; fileName: string }) => item.type === "asset" && item.fileName.endsWith(".css")).map((item: { source: string }) => item.source).join("\n");
   html = `<!doctype html><html lang="zh-CN" data-base-path="/id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>`;
 });
-const initialApp = { id: "project:app", projectId: "project", name: "测试网站", website: "https://site.example.com", type: "spa", enabled: true, clientId: "client-id", redirectUris: ["https://site.example.com/callback"], postLogoutRedirectUris: [], createdAt: "2026-11-12T00:00:00Z", updatedAt: "2026-11-12T00:00:00Z" };
+const initialApp = { id: "project:app", projectId: "project", name: "测试网站", website: "https://site.example.com", type: "spa", devMode: false, enabled: true, clientId: "client-id", redirectUris: ["https://site.example.com/callback"], postLogoutRedirectUris: [], createdAt: "2026-11-12T00:00:00Z", updatedAt: "2026-11-12T00:00:00Z" };
 const avatarImage = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64");
 test.beforeEach(async ({ context }) => {
   const apps = [structuredClone(initialApp)];
-  const account = { id: "user", displayName: "测试账号", givenName: "Given", familyName: "Family", email: "user@example.com", emailVerified: true, preferredLanguage: "zh-CN", avatarUrl: "" };
+  const account = { id: "user", username: "test-user", displayName: "测试账号", givenName: "Given", familyName: "Family", email: "user@example.com", emailVerified: true, preferredLanguage: "zh-CN", avatarUrl: "" };
   const methods: { type: string; id?: string; name: string; state: string }[] = [];
   const calls: { path: string; method: string; data: Record<string, unknown> }[] = [];
   let credentialId = "";
@@ -61,6 +61,7 @@ test.beforeEach(async ({ context }) => {
       if (method === "PATCH") { account.displayName = data.displayName; account.preferredLanguage = data.preferredLanguage; }
       value = { account };
     }
+    else if (endpoint === "/me/username") { account.username = data.username; value = { account, requiresRelogin: false }; }
     else if (endpoint === "/me/avatar") { account.avatarUrl = method === "DELETE" ? "" : "https://assets.example.com/avatar.png"; value = { account }; }
     else if (endpoint === "/me/email") { account.email = data.email; account.emailVerified = false; value = { userId: account.id, account }; }
     else if (endpoint === "/apps" && method === "GET") value = { applications: apps };
@@ -150,8 +151,9 @@ test("profile saves survive a page switch without refetching the entire portal",
 
 test("a unified profile places an editable avatar beside the forms and uploads without reloading", async ({ page, isMobile }, testInfo) => {
   await page.goto("http://localhost/id/account/settings/profile");
-  await expect(page.locator(".panel")).toHaveCount(1);
+  await expect(page.locator(".panel")).toHaveCount(2);
   await expect(page.getByRole("heading", { name: "个人资料", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "账号信息", exact: true })).toBeVisible();
   const input = page.getByLabel("选择头像图片", { exact: true });
   await expect(input).toBeHidden();
   await expect(page.getByRole("button", { name: "保存头像", exact: true })).toHaveCount(0);
@@ -235,9 +237,11 @@ test("an avatar upload disables editing while pending and keeps the preview for 
 test("the merged profile preserves the separate email verification flow and unsaved profile fields", async ({ page }) => {
   await page.goto("http://localhost/id/account/settings/profile");
   await page.getByLabel("昵称", { exact: true }).fill("未保存的昵称");
+  await page.locator(".setting-row").filter({ hasText: "邮箱" }).getByRole("button", { name: "更改", exact: true }).click();
   await page.getByLabel("新邮箱", { exact: true }).fill("new@example.com");
   await page.getByLabel("当前登录密码", { exact: true }).fill("current-password");
   await page.getByRole("button", { name: "保存并发送验证邮件", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByText("待验证", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "输入验证码", exact: true })).toHaveAttribute("href", "/id/verify-email?userID=user");
   await expect(page.getByLabel("昵称", { exact: true })).toHaveValue("未保存的昵称");

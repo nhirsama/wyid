@@ -1,10 +1,11 @@
+import { Code, ConnectError } from "@connectrpc/connect";
 import { passwordHint, passwordMeetsPolicy } from "@/lib/auth";
 import { siteUrl } from "@/lib/paths";
 import { getConfig, zitadelRequestHeaders } from "@/server/config";
-import { writePendingSession } from "@/server/session";
+import { clearAccountGrant, clearAuthenticatedSession, clearPendingSession, writePendingSession } from "@/server/session";
 import { getUserClients } from "@/server/zitadel/sdk";
 import { zitadel } from "@/server/zitadel/service";
-import { assert } from "./errors";
+import { AccountError, assert } from "./errors";
 import { persistRotation } from "./factors";
 import { accountProfile, type Identity } from "./identity";
 
@@ -14,8 +15,29 @@ export async function updateProfile(identity: Identity, input: { displayName: st
   catch { assert(false, 400, "invalid_language", "通知语言格式无效。"); }
   const profile = identity.state.user.type.value.profile;
   assert(profile?.givenName && profile.familyName, 400, "profile_missing", "账号资料不完整，请联系管理员。");
-  await getUserClients(identity.ref.sessionToken, identity.organizationId).user.updateHumanUser({ userId: identity.ref.userId, profile: { givenName: profile.givenName, familyName: profile.familyName, nickName: profile.nickName, gender: profile.gender, displayName: input.displayName, preferredLanguage: input.preferredLanguage } });
+  await getUserClients(identity.ref.sessionToken, identity.organizationId).user.updateHumanUser({ userId: identity.ref.userId, profile: { givenName: profile.givenName, familyName: profile.familyName, nickName: input.displayName, gender: profile.gender, displayName: input.displayName, preferredLanguage: input.preferredLanguage } });
   return { account: accountProfile(await zitadel.user(identity.ref.userId)) };
+}
+export async function updateUsername(identity: Identity, input: { username: string }) {
+  assert(identity.state.user.type.case === "human", 400, "human_required", "此账号无法修改用户名。");
+  const currentUsername = identity.state.user.username || identity.state.user.preferredLoginName;
+  assert(input.username !== currentUsername, 400, "username_unchanged", "新用户名不能与当前用户名相同。");
+  try {
+    await getUserClients(identity.ref.sessionToken, identity.organizationId).user.updateHumanUser({ userId: identity.ref.userId, username: input.username });
+  } catch (error) {
+    if (error instanceof ConnectError && error.code === Code.AlreadyExists) {
+      throw new AccountError(409, "username_taken", "该用户名已被占用，请更换其他用户名。");
+    }
+    throw error;
+  }
+  let requiresRelogin = false;
+  try {
+    await zitadel.session(identity.ref);
+  } catch {
+    requiresRelogin = true;
+    await Promise.all([clearAuthenticatedSession(), clearPendingSession(), clearAccountGrant()]);
+  }
+  return { account: accountProfile(await zitadel.user(identity.ref.userId)), requiresRelogin };
 }
 export async function updateEmail(identity: Identity, input: { email: string; password: string }) {
   await persistRotation(identity, await zitadel.updateSession(identity.ref, { password: { password: input.password } }));

@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { PencilSimple } from "@phosphor-icons/react";
 import { api } from "@/lib/account/api";
-import { AVATAR_HINT, avatarFileError } from "@/lib/account/avatar";
+import { avatarFileError } from "@/lib/account/avatar";
 import type { Account } from "@/lib/account/types";
 import { Avatar } from "./avatar";
 import { Submit, TaskNotice, useTask } from "./ui";
@@ -28,7 +28,7 @@ export function AvatarSettings({ account, onAccount }: { account: Account; onAcc
         onAccount(result.account); reset();
       }, "头像已更新。");
     }}>
-      <button className="avatar-picker" type="button" aria-label="更换头像" aria-describedby={`${id}-hint`} disabled={task.busy} onClick={() => inputRef.current?.click()}>
+      <button className="avatar-picker" type="button" aria-label="更换头像" disabled={task.busy} onClick={() => inputRef.current?.click()}>
         <Avatar account={account} size={192} previewUrl={selection?.preview} />
         <span className="avatar-edit-badge"><PencilSimple size={15} aria-hidden="true" />更换头像</span>
       </button>
@@ -44,7 +44,6 @@ export function AvatarSettings({ account, onAccount }: { account: Account; onAcc
         }
         setSelection({ file, preview: URL.createObjectURL(file) });
       }} />
-      <p id={`${id}-hint`} className="field-hint">{AVATAR_HINT}</p>
       <TaskNotice task={task} />
       {selection ? <div className="form-actions">
         <Submit busy={task.busy}>保存头像</Submit>

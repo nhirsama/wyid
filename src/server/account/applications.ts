@@ -19,7 +19,7 @@ export function publicApplication(projectId: string, app: App): Application {
   const config = app.config.value;
   let website = config.additionalOrigins[0] || "";
   if (!website && config.redirectUris[0]) { try { website = new URL(config.redirectUris[0]).origin; } catch { /* legacy application */ } }
-  return { id: `${projectId}:${app.id}`, projectId, name: app.name, website, type: config.appType === OIDCAppType.OIDC_APP_TYPE_USER_AGENT ? "spa" : "web", enabled: app.state === AppState.ACTIVE, clientId: config.clientId, redirectUris: config.redirectUris, postLogoutRedirectUris: config.postLogoutRedirectUris, createdAt: isoDate(app.details?.creationDate), updatedAt: isoDate(app.details?.changeDate) };
+  return { id: `${projectId}:${app.id}`, projectId, name: app.name, website, type: config.appType === OIDCAppType.OIDC_APP_TYPE_USER_AGENT ? "spa" : "web", devMode: Boolean(config.devMode), enabled: app.state === AppState.ACTIVE, clientId: config.clientId, redirectUris: config.redirectUris, postLogoutRedirectUris: config.postLogoutRedirectUris, createdAt: isoDate(app.details?.creationDate), updatedAt: isoDate(app.details?.changeDate) };
 }
 export function appConfig(input: ApplicationInput) {
   return {
@@ -29,7 +29,7 @@ export function appConfig(input: ApplicationInput) {
     authMethodType: input.type === "spa" ? OIDCAuthMethodType.OIDC_AUTH_METHOD_TYPE_NONE : OIDCAuthMethodType.OIDC_AUTH_METHOD_TYPE_BASIC,
     version: OIDCVersion.OIDC_VERSION_1_0, accessTokenType: OIDCTokenType.OIDC_TOKEN_TYPE_JWT,
     additionalOrigins: [new URL(input.website).origin],
-    devMode: [input.website, ...input.redirectUris, ...input.postLogoutRedirectUris].some(uri => new URL(uri).protocol === "http:"),
+    devMode: input.devMode,
     loginVersion: { version: { case: "loginV2" as const, value: { baseUri: siteUrl("/", getConfig().appUrl).toString() } } },
   };
 }

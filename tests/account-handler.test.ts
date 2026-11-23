@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { ErrorDetailSchema } from "@zitadel/proto/zitadel/message_pb.js";
 import { identityFixture } from "./fixtures/account";
-const mocks = vi.hoisted(() => ({ identity: vi.fn(), profile: vi.fn(), upload: vi.fn(), devices: vi.fn(), revoke: vi.fn(), check: vi.fn(), methods: vi.fn(), clearSession: vi.fn(), clearGrant: vi.fn(), clearPending: vi.fn(), readSession: vi.fn(), deleteSession: vi.fn() }));
+const mocks = vi.hoisted(() => ({ identity: vi.fn(), profile: vi.fn(), username: vi.fn(), upload: vi.fn(), devices: vi.fn(), revoke: vi.fn(), check: vi.fn(), methods: vi.fn(), clearSession: vi.fn(), clearGrant: vi.fn(), clearPending: vi.fn(), readSession: vi.fn(), deleteSession: vi.fn() }));
 const rpc = vi.hoisted(() => ({ listUserMemberships: vi.fn(), addProject: vi.fn(), addProjectMember: vi.fn(), addOIDCApp: vi.fn(), listApps: vi.fn() }));
 vi.mock("@/server/account/identity", async importOriginal => ({ ...await importOriginal<typeof import("@/server/account/identity")>(), accountIdentity: mocks.identity }));
 vi.mock("@/server/config", async importOriginal => ({ ...await importOriginal<typeof import("@/server/config")>(), getConfig: () => ({ appUrl: "https://login.example.com" }) }));
-vi.mock("@/server/account/profile", () => ({ updateProfile: mocks.profile, updateEmail: vi.fn(), updatePassword: vi.fn(), uploadAvatar: mocks.upload, removeAvatar: vi.fn() }));
+vi.mock("@/server/account/profile", () => ({ updateProfile: mocks.profile, updateUsername: mocks.username, updateEmail: vi.fn(), updatePassword: vi.fn(), uploadAvatar: mocks.upload, removeAvatar: vi.fn() }));
 vi.mock("@/server/account/devices", () => ({ devices: mocks.devices, revokeDevice: mocks.revoke }));
 vi.mock("@/server/account/factors", () => ({ authenticationMethods: mocks.methods, checkFactor: mocks.check, sendCheck: vi.fn(), finishKey: vi.fn(), startKey: vi.fn(), startTotp: vi.fn(), confirmTotp: vi.fn(), addOtp: vi.fn(), startPhone: vi.fn(), confirmPhone: vi.fn(), removeFactor: vi.fn() }));
 vi.mock("@/server/session", () => ({ clearAuthenticatedSession: mocks.clearSession, clearAccountGrant: mocks.clearGrant, clearPendingSession: mocks.clearPending, readAuthenticatedSession: mocks.readSession }));
@@ -53,8 +53,14 @@ describe("account HTTP boundary", () => {
   });
   it("rejects malformed and excessive data before mutating ZITADEL", async () => {
     expect((await handle("/me", "PATCH", { displayName: "", preferredLanguage: "zh-CN" })).status).toBe(400);
+    expect((await handle("/me/username", "POST", { username: "bad_name@1" })).status).toBe(400);
     expect((await handle("/apps", "POST", {}, { "Content-Length": "131073" })).status).toBe(413);
     expect(mocks.profile).not.toHaveBeenCalled();
+    expect(mocks.username).not.toHaveBeenCalled();
+    mocks.username.mockResolvedValueOnce({ account: { id: "user", username: "new-name-1", displayName: "Test User" }, requiresRelogin: false });
+    const renamed = await handle("/me/username", "POST", { username: "  new-name-1  " });
+    expect(renamed.status).toBe(200);
+    expect(mocks.username).toHaveBeenCalledWith(expect.anything(), { username: "new-name-1" });
     await expect(readAccountBody(new Request(`${origin}/api/account/me`, { method: "PATCH", body: '{"invalid"' }))).rejects.toMatchObject({ code: "invalid_json" });
   });
   it.each([

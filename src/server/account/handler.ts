@@ -10,8 +10,8 @@ import { Applications } from "./applications";
 import { avatarFile } from "./avatar";
 import { devices, revokeDevice } from "./devices";
 import { addOtp, authenticationMethods, checkFactor, confirmPhone, confirmTotp, finishKey, removeFactor, sendCheck, startKey, startPhone, startTotp } from "./factors";
-import { removeAvatar, updateEmail, updatePassword, updateProfile, uploadAvatar } from "./profile";
-import { applicationSchema, parse, profileSchema } from "./validation";
+import { removeAvatar, updateEmail, updatePassword, updateProfile, updateUsername, uploadAvatar } from "./profile";
+import { applicationSchema, parse, profileSchema, usernameUpdateSchema } from "./validation";
 
 const password = z.string().min(1).max(1024);
 const code = z.string().trim().min(1).max(256);
@@ -80,6 +80,7 @@ export async function handleAccountRequest(request: Request, path: string[]) {
     const identity = await accountIdentity();
     if (pathname === "/me" && method === "GET") return json({ account: accountProfile(identity.state.user) });
     if (pathname === "/me" && method === "PATCH") return json(await updateProfile(identity, parse(profileSchema, data)));
+    if (pathname === "/me/username" && method === "POST") return json(await updateUsername(identity, parse(usernameUpdateSchema, data)));
     if (pathname === "/me/email" && method === "POST") return json(await updateEmail(identity, parse(z.object({ email: z.email().max(320), password }), data)));
     if (pathname === "/me/password" && method === "POST") return json(await updatePassword(identity, parse(z.object({ currentPassword: password, password }), data)));
     if (pathname === "/me/avatar" && method === "POST") return json(await uploadAvatar(identity, await avatarFile(request)));

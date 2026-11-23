@@ -15,9 +15,9 @@ vi.mock("@/server/config", () => ({ getConfig: () => ({ appUrl: "https://login.e
 import { Applications, appConfig, applicationIds } from "@/server/account/applications";
 import { applicationSchema } from "@/server/account/validation";
 
-const input = { name: "My website", type: "spa" as const, website: "https://site.example.com", redirectUris: ["https://site.example.com/callback"], postLogoutRedirectUris: [] };
+const input = { name: "My website", type: "spa" as const, devMode: false, website: "https://site.example.com", redirectUris: ["https://site.example.com/callback"], postLogoutRedirectUris: [] };
 const membership = (projectId = "project", roles = ["PROJECT_OWNER"], org = "org", userId = "user") => create(MembershipSchema, { userId, details: { resourceOwner: org }, roles, type: { case: "projectId", value: projectId } });
-const app = (type = OIDCAppType.OIDC_APP_TYPE_USER_AGENT) => create(AppSchema, { id: "app", name: input.name, state: AppState.ACTIVE, config: { case: "oidcConfig", value: { clientId: "client", redirectUris: input.redirectUris, additionalOrigins: [input.website], appType: type } } });
+const app = (type = OIDCAppType.OIDC_APP_TYPE_USER_AGENT, devMode = false) => create(AppSchema, { id: "app", name: input.name, state: AppState.ACTIVE, config: { case: "oidcConfig", value: { clientId: "client", devMode, redirectUris: input.redirectUris, additionalOrigins: [input.website], appType: type } } });
 beforeEach(() => {
   vi.resetAllMocks(); vi.stubEnv("BASE_PATH", "/nested/login");
   mocks.userClients.mockReturnValue({ management: mocks.user });
@@ -98,15 +98,51 @@ describe("native application ownership", () => {
   });
 });
 describe("OIDC configuration and validation", () => {
-  it("sets the runtime login URI, code flow, PKCE-compatible SPA and web auth", () => {
+  it("sets the runtime login URI, code flow, PKCE-compatible SPA and web auth, and explicit devMode", () => {
     expect(appConfig(input)).toMatchObject({ authMethodType: OIDCAuthMethodType.OIDC_AUTH_METHOD_TYPE_NONE, devMode: false, loginVersion: { version: { case: "loginV2", value: { baseUri: "https://login.example.com/nested/login/" } } } });
-    expect(appConfig({ ...input, type: "web", website: "http://localhost:4000" })).toMatchObject({ authMethodType: OIDCAuthMethodType.OIDC_AUTH_METHOD_TYPE_BASIC, devMode: true });
+    expect(appConfig({ ...input, type: "web", devMode: true, website: "http://localhost:4000" })).toMatchObject({ authMethodType: OIDCAuthMethodType.OIDC_AUTH_METHOD_TYPE_BASIC, devMode: true });
+    expect(appConfig({ ...input, devMode: true })).toMatchObject({ devMode: true });
   });
-  it.each(["http://example.com/cb", "https://u:p@site.example/cb", "https://site.example/cb#fragment", "javascript:alert(1)", "https://site.example/\ncb"])("rejects unsafe callbacks: %s", uri => {
-    expect(applicationSchema.safeParse({ ...input, redirectUris: [uri] }).success).toBe(false);
+  it("exposes devMode from ZITADEL OIDCConfig", async () => {
+    mocks.user.listApps.mockResolvedValue({ result: [app(OIDCAppType.OIDC_APP_TYPE_USER_AGENT, true)] });
+    const applications = await new Applications(identityFixture()).list();
+    expect(applications[0]).toMatchObject({ devMode: true });
   });
-  it.each(["http://localhost:3000/cb", "http://127.0.0.1/cb", "http://[::1]/cb", "https://site.example/cb?flow=1"])("accepts exact callback paths: %s", uri => {
-    expect(applicationSchema.safeParse({ ...input, redirectUris: [uri] }).success).toBe(true);
+  it.each([
+    "http://example.com/cb",
+    "http://localhost:3000/cb",
+    "http://127.0.0.1/cb",
+    "https://u:p@site.example/cb",
+    "https://site.example/cb#fragment",
+    "javascript:alert(1)",
+    "https://site.example/\ncb",
+  ])("rejects HTTP and unsafe callbacks when devMode is disabled: %s", uri => {
+    expect(applicationSchema.safeParse({ ...input, devMode: false, redirectUris: [uri] }).success).toBe(false);
+  });
+  it("rejects website URLs with extra paths or query strings, and duplicate redirect URIs", () => {
+    expect(applicationSchema.safeParse({ ...input, website: "https://site.example.com/app" }).success).toBe(false);
+    expect(applicationSchema.safeParse({ ...input, website: "https://site.example.com/?a=1" }).success).toBe(false);
+    expect(applicationSchema.safeParse({ ...input, website: "https://site.example.com/" }).success).toBe(true);
+    expect(applicationSchema.safeParse({ ...input, redirectUris: ["https://site.example.com/cb", "https://site.example.com/cb"] }).success).toBe(false);
+  });
+  it.each([
+    "http://localhost:3000/cb",
+    "http://127.0.0.1/cb",
+    "http://[::1]/cb",
+    "http://192.168.1.20:5173/cb",
+    "http://dev.internal:8080/cb",
+    "https://site.example/cb?flow=1",
+  ])("accepts HTTP and HTTPS callback paths when devMode is enabled: %s", uri => {
+    expect(applicationSchema.safeParse({ ...input, devMode: true, website: "http://192.168.1.20:5173", redirectUris: [uri] }).success).toBe(true);
+  });
+  it.each([
+    "ftp://localhost/cb",
+    "javascript:alert(1)",
+    "http://u:p@localhost/cb",
+    "http://localhost/cb#fragment",
+    "http://localhost/\ncb",
+  ])("still rejects unsafe callbacks even when devMode is enabled: %s", uri => {
+    expect(applicationSchema.safeParse({ ...input, devMode: true, redirectUris: [uri] }).success).toBe(false);
   });
   it.each(["project", "project:app:extra", "../project:app", "project:app%2fother"])("rejects invalid IDs: %s", id => { expect(() => applicationIds(id)).toThrow(); });
 });

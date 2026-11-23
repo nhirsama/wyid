@@ -4,6 +4,7 @@ export type Application = {
   name: string;
   website: string;
   type: ApplicationType;
+  devMode: boolean;
   enabled: boolean;
   clientId: string;
   projectId: string;
@@ -12,8 +13,8 @@ export type Application = {
   createdAt: string;
   updatedAt: string;
 };
-export type ApplicationInput = Pick<Application, "name" | "website" | "type" | "redirectUris" | "postLogoutRedirectUris">;
-export type Account = { id: string; displayName: string; givenName: string; familyName: string; email: string; emailVerified: boolean; preferredLanguage: string; avatarUrl?: string };
+export type ApplicationInput = Pick<Application, "name" | "website" | "type" | "devMode" | "redirectUris" | "postLogoutRedirectUris">;
+export type Account = { id: string; username?: string; displayName: string; givenName: string; familyName: string; email: string; emailVerified: boolean; preferredLanguage: string; avatarUrl?: string };
 export type PasswordPolicy = { minLength: number; hasUppercase: boolean; hasLowercase: boolean; hasNumber: boolean; hasSymbol: boolean };
 export type PublicConfig = { configured: boolean; missing: string[]; issuer: string; loginMethods: { password: boolean; registration: boolean; passkey?: boolean }; passwordPolicy: PasswordPolicy | null };
 export type Device = { id: string; name: string; createdAt: string; lastUsedAt: string; current: boolean };

@@ -22,7 +22,7 @@ export async function accountIdentity(allowFactorCheck = false): Promise<Identit
 export function accountProfile(user: AuthenticationState["user"]): Account {
   if (user.type.case !== "human") throw new Error("Expected human account");
   const { profile, email } = user.type.value;
-  return { id: user.userId, displayName: profile?.displayName || user.username, givenName: profile?.givenName || "", familyName: profile?.familyName || "", email: email?.email || "", emailVerified: email?.isVerified === true, preferredLanguage: profile?.preferredLanguage || "zh-CN", avatarUrl: profile?.avatarUrl || undefined };
+  return { id: user.userId, username: user.username || user.preferredLoginName, displayName: profile?.displayName || user.username, givenName: profile?.givenName || "", familyName: profile?.familyName || "", email: email?.email || "", emailVerified: email?.isVerified === true, preferredLanguage: profile?.preferredLanguage || "zh-CN", avatarUrl: profile?.avatarUrl || undefined };
 }
 
 export function issuerOrigin() {
