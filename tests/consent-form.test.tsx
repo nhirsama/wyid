@@ -15,7 +15,10 @@ describe("reference consent presentation", () => {
     expect(html).toContain("测试账号");
     expect(html).toContain("user@example.test");
     expect(html.match(/<li>/g)).toHaveLength(3);
-    for (const scope of ["openid", "profile", "email"]) expect(html).toContain(`<code>${scope}</code>`);
+    for (const scope of ["openid", "profile", "email"]) expect(html).not.toContain(`<code>${scope}</code>`);
+    expect(html).toContain("<strong>账号标识</strong>：用于在该网站识别你的账号。");
+    expect(html).toContain("<strong>基本资料</strong>：昵称、姓名、头像及其他基本资料。");
+    expect(html).toContain("<strong>邮箱</strong>：邮箱地址及邮箱验证状态。");
     expect(html).toContain(`class="${styles.smallButton}">取消</button>`);
     expect(html).toContain('aria-busy="false">允许</button>');
     expect(html).not.toContain("允许并继续");
@@ -33,8 +36,9 @@ describe("reference consent presentation", () => {
     expect(html).not.toContain(adminScope);
     expect(html).not.toContain("其他请求权限");
     expect(html).not.toContain("此网站请求的额外权限。");
-    expect(html).toContain("<strong>账号标识</strong>：用于在该网站识别你的账号。 <code>openid</code>");
-    expect(html).toContain("<strong>邮箱</strong>：邮箱地址及邮箱验证状态。 <code>email</code>");
+    expect(html).toContain("<strong>账号标识</strong>：用于在该网站识别你的账号。</li>");
+    expect(html).toContain("<strong>邮箱</strong>：邮箱地址及邮箱验证状态。</li>");
+    expect(html).not.toContain("<code>");
     expect(html.match(/<li>/g)).toHaveLength(2);
   });
 
@@ -42,9 +46,8 @@ describe("reference consent presentation", () => {
     const scopes = ["custom:read", "urn:zitadel:iam:org:project:roles", "urn:zitadel:iam:org:project:roles:read"];
     const html = renderToStaticMarkup(<ConsentForm authRequestId="V2_test" consentToken="token" appName="Test App"
       displayName="测试账号" email="user@example.test" scopes={scopes} />);
-    for (const scope of scopes) {
-      expect(html).toContain(`<strong>其他请求权限</strong>：此网站请求的额外权限。 <code>${scope}</code>`);
-    }
+    expect(html).not.toContain("<code>");
+    expect(html.match(/<strong>其他请求权限<\/strong>：此网站请求的额外权限。<\/li>/g)).toHaveLength(scopes.length);
     expect(html.match(/<li>/g)).toHaveLength(scopes.length);
   });
 });

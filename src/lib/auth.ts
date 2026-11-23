@@ -1,6 +1,14 @@
 import { z } from "zod";
 
-export const loginNameSchema = z.string().trim().min(1, "请输入邮箱或用户名。").max(320, "账号长度不能超过 320 个字符。");
+export const usernamePattern = /^[A-Za-z0-9-]+$/;
+export const usernameSchema = z
+  .string()
+  .trim()
+  .min(1, "请输入用户名。")
+  .max(100, "用户名不能超过 100 个字符。")
+  .regex(usernamePattern, "用户名只能包含大小写字母、数字和连字符（-）。");
+export const loginNameSchema = usernameSchema;
+const recoveryAccountSchema = z.string().trim().min(1, "请输入邮箱或用户名。").max(320, "账号长度不能超过 320 个字符。");
 const password = z.string().min(1, "请输入密码。").max(1024, "密码过长，请重新输入。");
 const code = z.string().trim().min(1, "请输入验证码。").max(256);
 // Only two-step verification methods. Passkeys use the separate login flow.
@@ -8,11 +16,11 @@ export const factorSchema = z.enum(["totp", "otpEmail", "otpSms", "u2f"]);
 export type Factor = z.infer<typeof factorSchema>;
 export const loginSchema = z.object({ loginName: loginNameSchema, password });
 export const registerSchema = z.object({
-  username: z.string().trim().min(1, "请输入用户名。").max(100, "用户名不能超过 100 个字符。"),
+  username: usernameSchema,
   email: z.email("请输入有效的邮箱地址。").max(320),
   password, confirmPassword: password,
 }).refine(value => value.password === value.confirmPassword, { path: ["confirmPassword"], message: "两次输入的密码不一致。" });
-export const forgotPasswordSchema = z.object({ loginName: loginNameSchema });
+export const forgotPasswordSchema = z.object({ loginName: recoveryAccountSchema });
 export const resetPasswordSchema = z.object({ password, confirmPassword: password, code }).refine(
   value => value.password === value.confirmPassword, { path: ["confirmPassword"], message: "两次输入的密码不一致。" },
 );
@@ -70,4 +78,27 @@ export function passwordMeetsPolicy(password: string, policy: PasswordPolicy) {
   return [...password].length >= policy.minLength && (!policy.uppercase || /[A-Z]/.test(password)) &&
     (!policy.lowercase || /[a-z]/.test(password)) && (!policy.number || /[0-9]/.test(password)) &&
     (!policy.symbol || /[^a-zA-Z0-9]/.test(password));
+}
+export function passwordMissingRequirements(password: string, policy: PasswordPolicy): string[] {
+  const missing: string[] = [];
+  if ([...password].length < policy.minLength) missing.push(`至少 ${policy.minLength} 个字符`);
+  if (policy.uppercase && !/[A-Z]/.test(password)) missing.push("大写字母");
+  if (policy.lowercase && !/[a-z]/.test(password)) missing.push("小写字母");
+  if (policy.number && !/[0-9]/.test(password)) missing.push("数字");
+  if (policy.symbol && !/[^a-zA-Z0-9]/.test(password)) missing.push("特殊字符");
+  return missing;
+}
+export function passwordUnmetHint(password: string, policy: PasswordPolicy): string | undefined {
+  if (!password) return undefined;
+  const missing = passwordMissingRequirements(password, policy);
+  if (!missing.length) return undefined;
+  const hasLength = [...password].length < policy.minLength;
+  if (hasLength) {
+    const [lengthRule, ...chars] = missing;
+    if (!chars.length) return `还需${lengthRule}。`;
+    const list = chars.length > 1 ? `${chars.slice(0, -1).join("、")}和${chars.at(-1)}` : chars[0];
+    return `还需${lengthRule}，并包含${list}。`;
+  }
+  const list = missing.length > 1 ? `${missing.slice(0, -1).join("、")}和${missing.at(-1)}` : missing[0];
+  return `还需包含${list}。`;
 }

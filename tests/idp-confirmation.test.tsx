@@ -31,6 +31,8 @@ describe("IDP registration confirmation uses live backend state", () => {
     expect(html).toContain("live@example.com");
     expect(html).not.toContain("Stale Profile");
     expect(html).toContain("创建账号并继续");
+    expect(html).toContain("返回登录");
+    expect(html).toContain('href="/login?authRequest=V2_test"');
     expect(html).not.toContain("intent-token");
     expect(mocks.organization).toHaveBeenCalledWith("V2_test");
     expect(mocks.policy).toHaveBeenCalledWith("org-id");

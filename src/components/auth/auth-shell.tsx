@@ -22,7 +22,7 @@ export function AuthShell({ children }: { children: ReactNode }) {
 
 type AuthPanelProps = {
   title: string;
-  description: ReactNode;
+  description?: ReactNode;
   children: ReactNode;
   reference?: boolean;
   className?: string;
@@ -38,7 +38,7 @@ export function AuthPanel(props: AuthPanelProps) {
   const { title, description, children, reference = false, className } = busy ? idleProps : props;
   return <section className={["auth-card", reference && "reference-auth-card", className].filter(Boolean).join(" ")} aria-labelledby="auth-title" aria-busy={busy}>
     <div className="auth-panel-content">
-    <header className="auth-heading"><h1 id="auth-title">{title}</h1><p>{description}</p></header>
+    <header className="auth-heading"><h1 id="auth-title">{title}</h1>{description && <p>{description}</p>}</header>
     {children}
     </div>
   </section>;

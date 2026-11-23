@@ -102,3 +102,21 @@ export function useAuthAction() {
   }
   return { pending: transitionPending || navigating || !!flow && flow.phase !== "idle", result, run };
 }
+
+export function useCooldown(seconds = 60) {
+  const [remaining, setRemaining] = useState(0);
+  const active = remaining > 0;
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => {
+      setRemaining(value => (value <= 1 ? 0 : value - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return {
+    remaining,
+    active,
+    start: () => setRemaining(seconds),
+    reset: () => setRemaining(0),
+  };
+}

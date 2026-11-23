@@ -26,7 +26,12 @@ export default async function VerifyPage({ searchParams }: { searchParams: Promi
     } catch { /* Application display metadata must not change the authentication result. */ }
   }
   const title = state?.step === "password-change" ? "更新登录密码" : state?.step === "verify-email" ? "验证账号邮箱" : state?.step === "mfa" && state.needsEnrollment ? "设置验证方式" : "验证你的身份";
-  return <AuthPanel reference={isMfaLogin} title={title} description={isMfaLogin ? <>继续登录 <strong>{appName}</strong></> : "完成验证后即可继续登录。"}>
+  const description = isMfaLogin ? <>继续登录 <strong>{appName}</strong></>
+    : state?.step === "password-change" ? "请更新账号密码后继续登录。"
+    : state?.step === "verify-email" ? "打开验证邮件中的链接，或输入邮件中的验证码。"
+    : state?.step === "mfa" && state.needsEnrollment ? "绑定额外验证后完成本次登录。"
+    : undefined;
+  return <AuthPanel reference={isMfaLogin} title={title} description={description}>
     {!state ? <div className="result-stack"><Notice kind="error">登录验证会话不可用，请重试或重新登录。</Notice><AppLink className="button primary-button wide" href={authLink("/login", context)}>返回登录</AppLink></div>
       : state.step === "password-change" ? <LoginPasswordChangeForm context={context} policy={state.policy} />
       : state.step === "verify-email" ? <LoginEmailVerificationForm context={context} />

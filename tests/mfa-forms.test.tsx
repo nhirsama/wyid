@@ -70,9 +70,9 @@ describe("MFA client form rendering", () => {
     expect(input(html, "phone")).toContain('type="tel"');
     expect(html).toContain("+8613800138000");
     expect(html).toContain("发送手机验证短信");
-    expect(html).toContain("先发送短信并验证手机号码");
+    expect(html).toContain("首次设置或更换请先验证号码");
     expect(html).toContain("启用短信验证码并继续");
-    expect(html).toContain("已有已验证的手机号码可以直接启用");
+    expect(html).toContain("已有已验证手机号可直接启用");
     expect(actions.setEnrollmentPhone).not.toHaveBeenCalled();
   });
 
@@ -107,9 +107,9 @@ describe("login continuation forms", () => {
     expect(html).toContain("验证邮箱并继续");
   });
 
-  it("changes a password with confirmation and the live policy hint", () => {
+  it("changes a password with confirmation and hides policy hints until input", () => {
     const html = render(<LoginPasswordChangeForm context={context} policy={policy} />);
-    expect(html).toContain("密码至少 12 个字符，需包含大小写字母、数字和特殊字符。");
+    expect(html).not.toContain("密码至少 12 个字符");
     expect(input(html, "password")).toContain('autoComplete="new-password"');
     expect(input(html, "confirmPassword")).toContain('type="password"');
     expect(html).toContain("更新密码并继续");

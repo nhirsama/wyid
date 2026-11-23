@@ -1,13 +1,27 @@
 import { AuthPanel } from "@/components/auth/auth-shell";
 import { RegisterForm } from "@/components/auth/forms";
-import { authContext, authLink, canRegisterWithPassword } from "@/lib/auth";
+import { authContext, authLink, canRegisterWithPassword, type LoginPolicy } from "@/lib/auth";
+import { withBasePath } from "@/lib/paths";
 import { Notice } from "@/components/ui/form";
 import { zitadel } from "@/server/zitadel/service";
+import { actionError } from "@/server/errors";
 import { AppLink } from "@/components/ui/app-link";
+
 export const metadata = { title: "创建账号" };
 export default async function RegisterPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  const context = authContext(await searchParams); const policy = await zitadel.policy(await zitadel.organizationForAuth(context.authRequestId));
-  return <AuthPanel title="创建账号" description="填写账号信息，创建新账号。">
-    {canRegisterWithPassword(policy) ? <RegisterForm context={context} policy={policy} /> : <div className="result-stack"><Notice>当前未开放密码账号注册。</Notice><AppLink className="button secondary-button wide" href={authLink("/login", context)}>返回登录</AppLink></div>}
+  const context = authContext(await searchParams);
+  let policy: LoginPolicy | undefined;
+  let failure: ReturnType<typeof actionError> | undefined;
+  try {
+    policy = await zitadel.policy(await zitadel.organizationForAuth(context.authRequestId));
+  } catch (error) {
+    failure = actionError(error);
+  }
+  return <AuthPanel title="创建账号">
+    {!policy ? <div className="result-stack">
+      <Notice kind="error">{failure?.message || "暂时无法读取注册设置，请重新加载。"}{failure?.requestId && <small className="request-id">请求编号：{failure.requestId}</small>}</Notice>
+      <a className="button primary-button wide" href={withBasePath(authLink("/register", context))}>重新加载</a>
+      <AppLink className="text-link centered" href={authLink("/login", context)}>返回登录</AppLink>
+    </div> : canRegisterWithPassword(policy) ? <RegisterForm context={context} policy={policy} /> : <div className="result-stack"><Notice>当前未开放密码账号注册。</Notice><AppLink className="button secondary-button wide" href={authLink("/login", context)}>返回登录</AppLink></div>}
   </AuthPanel>;
 }

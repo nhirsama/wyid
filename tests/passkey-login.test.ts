@@ -25,6 +25,13 @@ describe("one-click passkey login", () => {
     expect(mocks.start).toHaveBeenCalledExactlyOnceWith({ chooseAccount: true }, context);
   });
 
+  it("uses the typed login name directly when provided", async () => {
+    expect(await loginWithPasskey(context, true, "  alice-01  ")).toEqual(success);
+    expect(mocks.start).toHaveBeenCalledExactlyOnceWith({ loginName: "alice-01" }, context);
+    expect(mocks.authenticate).toHaveBeenCalledExactlyOnceWith(options);
+    expect(mocks.finish).toHaveBeenCalledExactlyOnceWith(assertion, context);
+  });
+
   it.each([
     { ok: false, message: "通行密钥未启用。" },
     { ok: true, redirect: "/login?error=login_required" },

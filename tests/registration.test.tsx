@@ -5,7 +5,7 @@ import { LoginSettingsSchema } from "@zitadel/proto/zitadel/settings/v2/login_se
 import { PasswordComplexitySettingsSchema } from "@zitadel/proto/zitadel/settings/v2/password_settings_pb.js";
 
 const mocks = vi.hoisted(() => ({ loginSettings: vi.fn(), passwordSettings: vi.fn(), authRequest: vi.fn() }));
-vi.mock("@/server/config", () => ({ getConfig: () => ({ organizationId: undefined }) }));
+vi.mock("@/server/config", async importOriginal => ({ ...await importOriginal<typeof import("@/server/config")>(), getConfig: () => ({ organizationId: undefined }) }));
 vi.mock("@/server/zitadel/sdk", () => ({ getClients: () => ({
   settings: { getLoginSettings: mocks.loginSettings, getPasswordComplexitySettings: mocks.passwordSettings },
   oidc: { getAuthRequest: mocks.authRequest },
@@ -80,7 +80,7 @@ describe("registration follows the live ZITADEL policy", () => {
       expect(html).toContain('name="username"');
       expect(html).toContain('name="email"');
       expect(html).toContain('name="confirmPassword"');
-      expect(html).toContain("密码至少 12 个字符，需包含数字。");
+      expect(html).not.toContain("密码至少 12 个字符");
       for (const name of ["givenName", "familyName", "nickName"]) expect(html).not.toContain(`name="${name}"`);
     } else {
       expect(html).toContain("当前未开放密码账号注册。");
@@ -92,5 +92,21 @@ describe("registration follows the live ZITADEL policy", () => {
   it("does not enable registration when ZITADEL omits login settings", async () => {
     mocks.loginSettings.mockResolvedValue({});
     await expect(zitadel.policy()).rejects.toThrow("ZITADEL settings are missing");
+  });
+
+  it("renders a graceful retry panel when policy loading fails on the registration page", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      mocks.loginSettings.mockRejectedValueOnce({ code: 14 });
+      const page = await RegisterPage({ searchParams: Promise.resolve({ authRequest: "V2_test" }) });
+      const html = renderToStaticMarkup(page);
+      expect(html).toContain('role="alert"');
+      expect(html).toContain("重新加载");
+      expect(html).toContain('href="/register?authRequest=V2_test"');
+      expect(html).toContain('href="/login?authRequest=V2_test"');
+      expect(html).toContain("返回登录");
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

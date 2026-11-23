@@ -1,21 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { authContext, authLink, loginSchema, passwordHint, passwordMeetsPolicy, registerSchema, resetPasswordSchema, verifyTotpSchema } from "@/lib/auth";
+import { authContext, authLink, loginSchema, passwordHint, passwordMeetsPolicy, passwordUnmetHint, registerSchema, resetPasswordSchema, verifyTotpSchema } from "@/lib/auth";
 import { consentScopes } from "@/lib/consent";
 const passwordPolicy = { minLength: 10, uppercase: true, lowercase: true, number: true, symbol: true };
 describe("form contracts", () => {
-  it("trims login names without altering passwords", () => {
-    expect(loginSchema.parse({ loginName: "  cat  ", password: " secret " })).toEqual({ loginName: "cat", password: " secret " });
+  it("trims login usernames and rejects emails or disallowed characters", () => {
+    expect(loginSchema.parse({ loginName: "  Cat-01  ", password: " secret " })).toEqual({ loginName: "Cat-01", password: " secret " });
+    for (const invalid of ["cat@example.com", "小猫", "cat_01", "cat.01", "cat 01", "   ", "x".repeat(101)]) {
+      expect(loginSchema.safeParse({ loginName: invalid, password: "secret" }).success).toBe(false);
+    }
   });
   it("validates email and matching passwords", () => {
-    const input = { username: "小猫", email: "cat@example.com", password: "longpassword", confirmPassword: "different" };
+    const input = { username: "Cat-01", email: "cat@example.com", password: "longpassword", confirmPassword: "different" };
     expect(registerSchema.safeParse(input).success).toBe(false);
     expect(registerSchema.safeParse({ ...input, email: "invalid", confirmPassword: "longpassword" }).success).toBe(false);
   });
-  it("registers with just a username instead of separate given and family names", () => {
-    const input = { username: "  小猫  ", email: "cat@example.com", password: "longpassword", confirmPassword: "longpassword" };
-    expect(registerSchema.parse(input)).toEqual({ ...input, username: "小猫" });
-    expect(registerSchema.safeParse({ ...input, username: "   " }).success).toBe(false);
-    expect(registerSchema.safeParse({ ...input, username: "x".repeat(101) }).success).toBe(false);
+  it("registers with an ASCII alphanumeric/hyphen username only", () => {
+    const input = { username: "  Cat-01  ", email: "cat@example.com", password: "longpassword", confirmPassword: "longpassword" };
+    expect(registerSchema.parse(input)).toEqual({ ...input, username: "Cat-01" });
+    for (const invalid of ["小猫", "cat@example.com", "cat_01", "cat.01", "   ", "x".repeat(101)]) {
+      expect(registerSchema.safeParse({ ...input, username: invalid }).success).toBe(false);
+    }
   });
   it("preserves leading zeroes in TOTP codes", () => {
     expect(verifyTotpSchema.parse({ code: "001234" }).code).toBe("001234");
@@ -24,6 +28,11 @@ describe("form contracts", () => {
   it("validates passwords from the live complexity policy", () => {
     expect(passwordMeetsPolicy("LongPass123!", passwordPolicy)).toBe(true);
     expect(passwordMeetsPolicy("short", passwordPolicy)).toBe(false);
+    expect(passwordUnmetHint("", passwordPolicy)).toBeUndefined();
+    expect(passwordUnmetHint("abc", passwordPolicy)).toBe("还需至少 10 个字符，并包含大写字母、数字和特殊字符。");
+    expect(passwordUnmetHint("Abcdefghij", passwordPolicy)).toBe("还需包含数字和特殊字符。");
+    expect(passwordUnmetHint("Abcdefghij1", passwordPolicy)).toBe("还需包含特殊字符。");
+    expect(passwordUnmetHint("LongPass123!", passwordPolicy)).toBeUndefined();
   });
   it("requires reset tokens and matching password confirmation", () => {
     expect(resetPasswordSchema.safeParse({ password: "new-pass", confirmPassword: "new-pass", code: "" }).success).toBe(false);

@@ -56,7 +56,7 @@ test.describe("connected ZITADEL UI", () => {
   test("shows the direct login form without requiring an OIDC authorization request", async ({ page }) => {
     await page.goto(path("/login"));
     await expect(page.getByRole("heading", { name: "登录账号" })).toBeVisible();
-    await expect(page.getByLabel("邮箱或用户名")).toBeVisible();
+    await expect(page.getByLabel("用户名")).toBeVisible();
     await expect(page.getByRole("button", { name: "登录", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "登录", exact: true })).toBeEnabled();
     await expect(page.getByText("登录请求已过期或缺失，无法继续验证账号。")).toHaveCount(0);

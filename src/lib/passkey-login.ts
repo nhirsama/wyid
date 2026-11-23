@@ -2,9 +2,10 @@ import type { ActionResult, AuthContext } from "./auth";
 import { authenticate, passkeyUserId } from "./webauthn";
 import { finishPasskey, startPasskey } from "@/server/actions";
 
-export async function loginWithPasskey(context: AuthContext, chooseAccount = true): Promise<ActionResult> {
+export async function loginWithPasskey(context: AuthContext, chooseAccount = true, loginName?: string): Promise<ActionResult> {
   try {
-    let challenge = await startPasskey({ chooseAccount }, context);
+    const accountName = loginName?.trim();
+    let challenge = await startPasskey(accountName ? { loginName: accountName } : { chooseAccount }, context);
     if (!challenge.ok || challenge.redirect) return challenge;
     if (!challenge.options) return { ok: false, message: "身份服务未返回通行密钥验证请求，请重试。" };
 
