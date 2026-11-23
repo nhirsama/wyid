@@ -20,14 +20,16 @@ const mocks = vi.hoisted(() => ({
   startIdp: vi.fn(), retrieveIdp: vi.fn(), registerIdpUser: vi.fn(),
   writePendingSession: vi.fn(), readPendingSession: vi.fn(), clearPendingSession: vi.fn(),
   readPasskeyAccount: vi.fn(), writePasskeyAccount: vi.fn(),
+  revokeDeviceSessions: vi.fn(), currentSessionUserAgent: vi.fn(), readDeviceFingerprint: vi.fn(),
 }));
 vi.mock("@/server/config", () => ({ getConfig: mocks.config, getAppUrl: () => mocks.config().appUrl, ConfigurationError: class ConfigurationError extends Error {} }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 vi.mock("@/server/session", () => ({ writePendingSession: mocks.writePendingSession, readPendingSession: mocks.readPendingSession, clearPendingSession: mocks.clearPendingSession, writeAuthenticatedSession: mocks.writeAuthenticatedSession, clearAuthenticatedSession: mocks.clearAuthenticatedSession, readAuthenticatedSession: mocks.readAuthenticatedSession }));
 vi.mock("@/server/passkey-account", () => ({ readPasskeyAccount: mocks.readPasskeyAccount, writePasskeyAccount: mocks.writePasskeyAccount }));
+vi.mock("@/server/device-agent", () => ({ currentSessionUserAgent: mocks.currentSessionUserAgent, readDeviceFingerprint: mocks.readDeviceFingerprint }));
 vi.mock("@/server/zitadel/service", () => ({ zitadel: {
   authRequest: mocks.authRequest, canSkipConsent: mocks.canSkipConsent, organizationForAuth: mocks.organizationForAuth, organizationForUser: mocks.organizationForUser,
-  policy: mocks.policy, createSession: mocks.createSession, callback: mocks.callback, deny: mocks.deny, session: mocks.session, methods: mocks.methods, deleteSession: mocks.deleteSession,
+  policy: mocks.policy, createSession: mocks.createSession, callback: mocks.callback, deny: mocks.deny, session: mocks.session, methods: mocks.methods, deleteSession: mocks.deleteSession, revokeDeviceSessions: mocks.revokeDeviceSessions,
   verifyFactor: mocks.verifyFactor, challenge: mocks.challenge, register: mocks.register, findUser: mocks.findUser,
   user: mocks.user, updateSession: mocks.updateSession, verifyWebAuthn: mocks.verifyWebAuthn,
   enrollTotp: mocks.enrollTotp, confirmTotp: mocks.confirmTotp,
@@ -45,8 +47,8 @@ import {
 import { consentToken } from "@/server/consent";
 import { inspectAuthentication } from "@/server/authentication";
 
-const credentials = { loginName: "cat@example.com", password: "test-password" };
-const registration = { username: "猫猫", email: "cat@example.com", password: "longpassword", confirmPassword: "longpassword" };
+const credentials = { loginName: "cat-01", password: "test-password" };
+const registration = { username: "cat-01", email: "cat@example.com", password: "longpassword", confirmPassword: "longpassword" };
 const context = { authRequestId: "V2_test" };
 const policy: LoginPolicy = { password: true, registration: true, passwordReset: true, passkey: true, forceMfa: false, forceMfaLocalOnly: false, factors: ["totp"], userVerifiedKey: false, passwordPolicy: { minLength: 8, uppercase: false, lowercase: true, number: false, symbol: false }, identityProviders: [] };
 const authorization = create(AuthRequestSchema, { id: "V2_test", clientId: "client-id", redirectUri: "https://app.example.com/callback", scope: ["openid", "profile"], prompt: [] });
@@ -477,10 +479,13 @@ describe("ZITADEL server actions", () => {
     expect(mocks.verifyFactor).toHaveBeenCalledWith(expect.objectContaining({ sessionToken: "old-token" }), "totp", "001234");
     expect(mocks.callback).toHaveBeenCalledWith("V2_test", { sessionId: "session-id", sessionToken: "new-token" });
   });
-  it("does not invoke account APIs for invalid registration or password-reset inputs", async () => {
+  it("does not invoke account APIs for invalid registration, login, or password-reset inputs", async () => {
+    expect((await login({ loginName: "cat@example.com", password: "test-password" }, context)).ok).toBe(false);
+    expect((await register({ ...registration, username: "猫猫" }, context)).ok).toBe(false);
     expect((await register({ email: "invalid" }, context)).ok).toBe(false);
     expect((await requestPasswordReset({ loginName: "" }, context)).ok).toBe(false);
     expect((await resetPassword({ password: "short", confirmPassword: "different", code: "" }, { userId: "user-id" })).ok).toBe(false);
+    expect(mocks.createSession).not.toHaveBeenCalled();
     expect(mocks.register).not.toHaveBeenCalled();
     expect(mocks.requestPasswordReset).not.toHaveBeenCalled();
     expect(mocks.resetPassword).not.toHaveBeenCalled();
@@ -1297,5 +1302,47 @@ describe("zero-lifetime native MFA proof belongs to one login or step-up flow", 
     expect(await resumeAuthentication(context)).toEqual({ ok: true, redirect: "/verify?authRequest=V2_test" });
     expect(mocks.writePendingSession).toHaveBeenLastCalledWith(expect.objectContaining({ methods: ["totp"], needsEnrollment: true }));
     expectNoAuthentication();
+  });
+});
+
+describe("session lifetime, userAgent metadata, and deduplication", () => {
+  it("passes policy lifetime and browser userAgent, cleans up replaced sessions, and deduplicates same-device sessions on login", async () => {
+    const userAgent = { fingerprintId: "a137fc65-3e87-4da0-b5cd-936eb5972868", description: "Chrome · macOS" };
+    mocks.policy.mockResolvedValue({ ...policy, passwordLifetimeMs: 86_400_000 });
+    mocks.currentSessionUserAgent.mockResolvedValue(userAgent);
+    mocks.readDeviceFingerprint.mockResolvedValue(userAgent.fingerprintId);
+    mocks.readPendingSession.mockResolvedValue(pendingSession({ sessionId: "stale-pending", sessionToken: "pending-token" }));
+    mocks.readAuthenticatedSession.mockResolvedValue({ sessionId: "stale-auth", sessionToken: "auth-token", userId: "user-id" });
+    mocks.createSession.mockResolvedValue({ sessionId: "new-session", sessionToken: "new-token" });
+    mocks.session.mockResolvedValue(create(SessionSchema, { id: "new-session", userAgent, factors: { user: { id: "user-id" }, password: { verifiedAt: verifiedAt() } } }));
+
+    expect(await login(credentials, {})).toEqual({ ok: true, redirect: "/account" });
+    expect(mocks.createSession).toHaveBeenCalledWith(
+      { user: { search: { case: "loginName", value: credentials.loginName } }, password: { password: credentials.password } },
+      undefined,
+      { lifetimeMs: 86_400_000, userAgent },
+    );
+    expect(mocks.deleteSession).toHaveBeenCalledWith({ sessionId: "stale-pending", sessionToken: "pending-token" });
+    expect(mocks.deleteSession).toHaveBeenCalledWith({ sessionId: "stale-auth", sessionToken: "auth-token" });
+    expect(mocks.revokeDeviceSessions).toHaveBeenCalledWith("user-id", userAgent.fingerprintId, "new-session");
+  });
+
+  it("passes externalLoginLifetimeMs and userAgent on external IDP login", async () => {
+    const state = "a137fc65-3e87-4da0-b5cd-936eb5972868";
+    const userAgent = { fingerprintId: "b137fc65-3e87-4da0-b5cd-936eb5972868", description: "Safari · iPhone" };
+    mocks.currentSessionUserAgent.mockResolvedValue(userAgent);
+    mocks.readDeviceFingerprint.mockResolvedValue(userAgent.fingerprintId);
+    mockPendingSession(pendingSession({ ...idpBinding, authRequestId: undefined, idpState: state }));
+    mocks.policy.mockResolvedValue({ ...policy, identityProviders: [idp], externalLoginLifetimeMs: 3_600_000 });
+    mocks.retrieveIdp.mockResolvedValue({ userId: "user-id", idpInformation });
+    mocks.session.mockResolvedValue(create(SessionSchema, { id: "session-id", userAgent, factors: { user: { id: "user-id" }, intent: { verifiedAt: verifiedAt() } } }));
+
+    expect(await completeIdentityProvider({ state, idpIntentId: "intent-id", idpIntentToken: "intent-token" })).toEqual({ ok: true, redirect: "/account" });
+    expect(mocks.createSession).toHaveBeenCalledWith(
+      { user: { search: { case: "userId", value: "user-id" } }, idpIntent: { idpIntentId: "intent-id", idpIntentToken: "intent-token" } },
+      undefined,
+      { lifetimeMs: 3_600_000, userAgent },
+    );
+    expect(mocks.revokeDeviceSessions).toHaveBeenCalledWith("user-id", userAgent.fingerprintId, "session-id");
   });
 });

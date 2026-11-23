@@ -20,9 +20,18 @@ import { getClients } from "./sdk";
 // 使用安装版本的消息类型，避免用字符串反射或自建 REST 协议绕过 SDK 校验。
 type CheckInput = NonNullable<MessageInitShape<typeof CreateSessionRequestSchema>["checks"]>;
 type ChallengeInput = NonNullable<MessageInitShape<typeof CreateSessionRequestSchema>["challenges"]>;
+export type SessionUserAgent = { fingerprintId?: string; description?: string };
+export type CreateSessionOptions = { lifetimeMs?: number; userAgent?: SessionUserAgent };
 export type SessionRef = { sessionId: string; sessionToken: string };
 function durationMs(value?: Duration): number | undefined {
   return value === undefined ? undefined : Number(value.seconds) * 1000 + value.nanos / 1_000_000;
+}
+function durationFromMs(ms?: number) {
+  if (ms === undefined || !Number.isFinite(ms) || ms <= 0) return undefined;
+  let seconds = Math.floor(ms / 1000);
+  let nanos = Math.round((ms - seconds * 1000) * 1_000_000);
+  if (nanos >= 1_000_000_000) { seconds += 1; nanos -= 1_000_000_000; }
+  return seconds > 0 || nanos > 0 ? { seconds: BigInt(seconds), nanos } : undefined;
 }
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -147,8 +156,10 @@ export const zitadel = {
       identityProviders: providers.map(provider => ({ id: provider.id, name: provider.name, creationAllowed: Boolean(provider.options?.isCreationAllowed), autoCreation: Boolean(provider.options?.isAutoCreation) })),
     };
   },
-  async createSession(checks: CheckInput, challenges?: ChallengeInput) {
-    const result = await getClients().session.createSession(create(CreateSessionRequestSchema, { checks, challenges }));
+  async createSession(checks: CheckInput, challenges?: ChallengeInput, options?: CreateSessionOptions) {
+    const lifetime = durationFromMs(options?.lifetimeMs);
+    const userAgent = options?.userAgent && (options.userAgent.fingerprintId || options.userAgent.description) ? options.userAgent : undefined;
+    const result = await getClients().session.createSession(create(CreateSessionRequestSchema, { checks, challenges, userAgent, lifetime }));
     return { ...sessionRef(result), challenges: result.challenges };
   },
   async updateSession(session: SessionRef, checks?: CheckInput, challenges?: ChallengeInput) {
@@ -162,6 +173,29 @@ export const zitadel = {
     return result.session;
   },
   async deleteSession(session: SessionRef) { await getClients().session.deleteSession(session); },
+  async revokeDeviceSessions(userId: string, fingerprintId: string, keepSessionId: string) {
+    if (!userId || !fingerprintId) return;
+    const stale: string[] = [];
+    for (let offset = 0n; ;) {
+      const page = await getClients().session.listSessions({
+        query: { offset, limit: 100 },
+        queries: [
+          { query: { case: "userIdQuery", value: { id: userId } } },
+          { query: { case: "userAgentQuery", value: { fingerprintId } } },
+        ],
+      });
+      for (const session of page.sessions) {
+        if (session.factors?.user?.id !== userId || session.id === keepSessionId) continue;
+        if (session.userAgent?.fingerprintId !== fingerprintId) continue;
+        stale.push(session.id);
+      }
+      offset += BigInt(page.sessions.length);
+      if (!page.sessions.length || offset >= (page.details?.totalResult ?? offset)) break;
+    }
+    for (let i = 0; i < stale.length; i += 10) {
+      await Promise.allSettled(stale.slice(i, i + 10).map(sessionId => getClients().session.deleteSession({ sessionId })));
+    }
+  },
   async user(userId: string) {
     const { user } = await getClients().user.getUserByID({ userId });
     if (!user || user.type.case !== "human") throw new AuthError("此账号无法使用网页登录。");

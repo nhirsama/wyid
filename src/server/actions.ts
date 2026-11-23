@@ -8,7 +8,8 @@ import { authLink, canRegisterWithPassword, factorSchema, forgotPasswordSchema, 
 import { AuthError, actionError } from "./errors";
 import { clearAuthenticatedSession, clearPendingSession, readAuthenticatedSession, readPendingSession, writeAuthenticatedSession, writePendingSession, type PendingSession } from "./session";
 import { getConfig } from "./config";
-import { zitadel, type SessionRef } from "./zitadel/service";
+import { currentSessionUserAgent, readDeviceFingerprint } from "./device-agent";
+import { zitadel, type CreateSessionOptions, type SessionRef } from "./zitadel/service";
 import { authenticationExpiresAt, canReuseAuthentication, inspectAuthentication, requiresFreshLogin, type AuthenticationState } from "./authentication";
 import { ErrorReason, Prompt, type AuthRequest } from "@zitadel/proto/zitadel/oidc/v2/authorization_pb.js";
 import { redirectToApp } from "./redirect";
@@ -48,12 +49,33 @@ async function deferAuthentication(pending: PendingSession, state: Authenticatio
   await writePendingSession({ ...pending, userId: state.userId, methods: state.methods, needsEnrollment: state.needsEnrollment });
   return { ok: true, redirect: authLink("/verify", pending) };
 }
+async function sessionOptions(lifetimeMs?: number): Promise<CreateSessionOptions | undefined> {
+  const userAgent = await currentSessionUserAgent();
+  const validLifetime = lifetimeMs !== undefined && Number.isFinite(lifetimeMs) && lifetimeMs > 0 ? lifetimeMs : undefined;
+  if (!userAgent && validLifetime === undefined) return undefined;
+  return { ...(userAgent ? { userAgent } : {}), ...(validLifetime !== undefined ? { lifetimeMs: validLifetime } : {}) };
+}
+async function deleteStaleSession(ref?: { sessionId?: string; sessionToken?: string } | null, keepSessionId?: string) {
+  if (!ref?.sessionId || !ref.sessionToken || ref.sessionId === keepSessionId) return;
+  try { await zitadel.deleteSession({ sessionId: ref.sessionId, sessionToken: ref.sessionToken }); }
+  catch { /* A stale or already expired session must not block a new login. */ }
+}
+async function cleanupReplacedSessions(keepSessionId?: string) {
+  const [previousPending, previousAuth] = await Promise.all([readPendingSession(), readAuthenticatedSession()]);
+  await deleteStaleSession(previousPending, keepSessionId);
+  if (previousAuth?.sessionId !== previousPending?.sessionId) await deleteStaleSession(previousAuth, keepSessionId);
+}
 async function rememberAuthentication(pending: PendingSession, state: AuthenticationState) {
   const expiresAt = authenticationExpiresAt(state);
   // A successful upstream callback may finish right at the deadline. Do not
   // turn an already consumed authorization into an error just to cache it.
-  if (expiresAt !== undefined && expiresAt <= Date.now()) return await clearAuthenticatedSession();
-  await writeAuthenticatedSession({ sessionId: pending.sessionId, sessionToken: pending.sessionToken, userId: state.userId, mfaStartedAt: pending.mfaStartedAt, expiresAt });
+  if (expiresAt !== undefined && expiresAt <= Date.now()) await clearAuthenticatedSession();
+  else await writeAuthenticatedSession({ sessionId: pending.sessionId, sessionToken: pending.sessionToken, userId: state.userId, mfaStartedAt: pending.mfaStartedAt, expiresAt });
+  const fingerprintId = state.session.userAgent?.fingerprintId || await readDeviceFingerprint();
+  if (fingerprintId) {
+    try { await zitadel.revokeDeviceSessions(state.userId, fingerprintId, pending.sessionId); }
+    catch { /* Best-effort same-device deduplication. */ }
+  }
 }
 async function callback(pending: PendingSession, state: AuthenticationState, request: AuthRequest): Promise<ActionResult> {
   if (!pending.authRequestId) throw new AuthError("登录会话缺少授权请求。");
@@ -141,7 +163,9 @@ async function beginLogin(input: PrimaryLoginInput, ctx: ReturnType<typeof conte
   if (!input.passkey && !policy.password) throw new AuthError("此组织未启用密码登录，请使用可用的其他登录方式。");
   let search: { case: "userId" | "loginName"; value: string };
   if (input.passkey) {
-    const loginName = input.loginName || auth?.loginHint || ctx.loginHint;
+    const hint = auth?.loginHint || ctx.loginHint;
+    const validHint = hint && loginNameSchema.safeParse(hint).success ? loginNameSchema.parse(hint) : undefined;
+    const loginName = input.loginName || validHint;
     const remembered = !input.chooseAccount && !input.userId && !loginName ? await readPasskeyAccount() : null;
     const userId = input.userId || remembered?.userId;
     if (input.chooseAccount || (!userId && !loginName)) {
@@ -158,11 +182,16 @@ async function beginLogin(input: PrimaryLoginInput, ctx: ReturnType<typeof conte
     search = userId ? { case: "userId", value: userId } : { case: "loginName", value: loginName! };
   } else search = { case: "loginName", value: input.loginName };
   const mfaStartedAt = Date.now();
+  const options = await sessionOptions(input.passkey ? policy.multiFactorLifetimeMs : policy.passwordLifetimeMs);
   let created: Awaited<ReturnType<typeof zitadel.createSession>>;
   try {
-    created = input.passkey
-      ? await zitadel.createSession({ user: { search } }, { webAuthN: { domain: new URL(getConfig().appUrl).hostname, userVerificationRequirement: UserVerificationRequirement.REQUIRED } })
-      : await zitadel.createSession({ user: { search }, password: { password: input.password } });
+    if (input.passkey) {
+      const challenges = { webAuthN: { domain: new URL(getConfig().appUrl).hostname, userVerificationRequirement: UserVerificationRequirement.REQUIRED } };
+      created = options ? await zitadel.createSession({ user: { search } }, challenges, options) : await zitadel.createSession({ user: { search } }, challenges);
+    } else {
+      const checks = { user: { search }, password: { password: input.password } };
+      created = options ? await zitadel.createSession(checks, undefined, options) : await zitadel.createSession(checks);
+    }
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
     // Only a rejected password/account check is a credentials error, not a
@@ -170,10 +199,7 @@ async function beginLogin(input: PrimaryLoginInput, ctx: ReturnType<typeof conte
     if (!input.passkey && (code === 5 || code === 16)) return { ...actionError(error), message: "账号或密码错误" };
     throw error;
   }
-  const previous = await readPendingSession();
-  if (previous?.passkeyPending && previous.sessionId && previous.sessionToken) {
-    try { await zitadel.deleteSession(previous); } catch { /* A stale challenge must not block a new login. */ }
-  }
+  await cleanupReplacedSessions(created.sessionId);
   await clearAuthenticatedSession();
   const pending = { sessionId: created.sessionId, sessionToken: created.sessionToken, authRequestId: auth?.id, mfaStartedAt };
   if (input.passkey) {
@@ -478,6 +504,7 @@ export async function chooseIdentityProvider(raw: unknown, rawContext: AuthConte
     if (next.case === "authUrl") result = { ok: true, redirect: next.value };
     else if (next.case === "formData") result = { ok: true, form: { action: new URL(next.value.url).toString(), fields: next.value.fields } };
     else throw new AuthError("身份提供方没有返回可用的登录地址。");
+    await cleanupReplacedSessions();
     await clearAuthenticatedSession();
     await writePendingSession({ authRequestId: ctx.authRequestId, sessionId: "", sessionToken: "", methods: [], userId: "", idpState: state, idpId: id, idpOrganizationId: organizationId || "" });
     return result;
@@ -500,7 +527,7 @@ export async function completeIdentityProvider(raw: unknown): Promise<ActionResu
     const input = z.object({ idpIntentId: z.string().min(1).max(1024), idpIntentToken: z.string().min(1).max(4096), state: z.string().uuid() }).parse(raw);
     const pending = await readPendingSession();
     if (!pending?.idpState || pending.idpState !== input.state) throw new AuthError("身份提供方登录状态无效，请重新开始。");
-    const { provider, result } = await inspectIdentityProvider(pending, input);
+    const { policy, provider, result } = await inspectIdentityProvider(pending, input);
     let userId = result.userId;
     if (!userId && result.addHumanUser && provider.creationAllowed && provider.autoCreation) userId = (await zitadel.registerIdpUser(result.addHumanUser)).userId;
     else if (!userId && result.addHumanUser && provider.creationAllowed) {
@@ -509,7 +536,10 @@ export async function completeIdentityProvider(raw: unknown): Promise<ActionResu
     }
     if (!userId) throw new AuthError("此身份提供方尚未关联账号，且当前组织不允许自动创建账号。");
     const mfaStartedAt = Date.now();
-    const session = await zitadel.createSession({ user: { search: { case: "userId", value: userId } }, idpIntent: { idpIntentId: input.idpIntentId, idpIntentToken: input.idpIntentToken } });
+    const checks = { user: { search: { case: "userId" as const, value: userId } }, idpIntent: { idpIntentId: input.idpIntentId, idpIntentToken: input.idpIntentToken } };
+    const options = await sessionOptions(policy.externalLoginLifetimeMs);
+    const session = options ? await zitadel.createSession(checks, undefined, options) : await zitadel.createSession(checks);
+    await deleteStaleSession(await readAuthenticatedSession(), session.sessionId);
     return await finishOrFactor({ ...session, authRequestId: pending.authRequestId, mfaStartedAt });
   } catch (error) { return actionError(error); }
 }
@@ -518,7 +548,7 @@ export async function confirmIdentityProviderRegistration(raw: unknown): Promise
     const { state } = z.object({ state: z.string().uuid() }).parse(raw);
     const pending = await readPendingSession();
     if (!pending || pending.idpState !== state || !pending.idpIntentId || !pending.idpIntentToken) throw new AuthError("身份提供方注册请求已过期，请重新开始。");
-    const { provider, result } = await inspectIdentityProvider(pending, { idpIntentId: pending.idpIntentId, idpIntentToken: pending.idpIntentToken });
+    const { policy, provider, result } = await inspectIdentityProvider(pending, { idpIntentId: pending.idpIntentId, idpIntentToken: pending.idpIntentToken });
     let userId = result.userId;
     if (!userId) {
       if (!provider.creationAllowed) throw new AuthError("此身份提供方当前不允许创建账号，请重新选择登录方式。");
@@ -527,7 +557,10 @@ export async function confirmIdentityProviderRegistration(raw: unknown): Promise
       if (!userId) throw new AuthError("创建账号失败，请重新检查身份提供方返回资料。");
     }
     const mfaStartedAt = Date.now();
-    const session = await zitadel.createSession({ user: { search: { case: "userId", value: userId } }, idpIntent: { idpIntentId: pending.idpIntentId, idpIntentToken: pending.idpIntentToken } });
+    const checks = { user: { search: { case: "userId" as const, value: userId } }, idpIntent: { idpIntentId: pending.idpIntentId, idpIntentToken: pending.idpIntentToken } };
+    const options = await sessionOptions(policy.externalLoginLifetimeMs);
+    const session = options ? await zitadel.createSession(checks, undefined, options) : await zitadel.createSession(checks);
+    await deleteStaleSession(await readAuthenticatedSession(), session.sessionId);
     return await finishOrFactor({ ...session, authRequestId: pending.authRequestId, mfaStartedAt });
   } catch (error) { return actionError(error); }
 }

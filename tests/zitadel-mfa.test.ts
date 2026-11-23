@@ -1,7 +1,8 @@
 import { create, toJson, type JsonObject, type MessageInitShape } from "@bufbuild/protobuf";
 import { DurationSchema } from "@bufbuild/protobuf/wkt";
 import { UserVerificationRequirement } from "@zitadel/proto/zitadel/session/v2/challenge_pb.js";
-import { CreateSessionResponseSchema, SetSessionRequestSchema, SetSessionResponseSchema } from "@zitadel/proto/zitadel/session/v2/session_service_pb.js";
+import { CreateSessionResponseSchema, ListSessionsResponseSchema, SetSessionRequestSchema, SetSessionResponseSchema } from "@zitadel/proto/zitadel/session/v2/session_service_pb.js";
+import { SessionSchema } from "@zitadel/proto/zitadel/session/v2/session_pb.js";
 import { LoginSettingsSchema } from "@zitadel/proto/zitadel/settings/v2/login_settings_pb.js";
 import { GetLoginSettingsResponseSchema, GetPasswordComplexitySettingsResponseSchema } from "@zitadel/proto/zitadel/settings/v2/settings_service_pb.js";
 import { AuthFactorSchema, AuthFactorState, PasskeySchema } from "@zitadel/proto/zitadel/user/v2/user_pb.js";
@@ -33,7 +34,12 @@ const mocks = vi.hoisted(() => ({
     getLoginSettings: vi.fn<Clients["settings"]["getLoginSettings"]>(),
     getPasswordComplexitySettings: vi.fn<Clients["settings"]["getPasswordComplexitySettings"]>(),
   },
-  session: { setSession: vi.fn<Clients["session"]["setSession"]>(), createSession: vi.fn<Clients["session"]["createSession"]>() },
+  session: {
+    setSession: vi.fn<Clients["session"]["setSession"]>(),
+    createSession: vi.fn<Clients["session"]["createSession"]>(),
+    listSessions: vi.fn<Clients["session"]["listSessions"]>(),
+    deleteSession: vi.fn<Clients["session"]["deleteSession"]>(),
+  },
 }));
 vi.mock("@/server/config", () => ({ getConfig: () => ({ appUrl: "https://login.example.com:8443/auth", organizationId: "org-id" }) }));
 vi.mock("@/server/zitadel/sdk", () => ({ getClients: () => mocks }));
@@ -89,6 +95,38 @@ describe("MFA policy SDK adaptation", () => {
     mocks.session.createSession.mockResolvedValue(create(CreateSessionResponseSchema, { sessionId: "session-id", sessionToken: "token" }));
     await expect(zitadel.createSession({ user: { search: { case: "loginName", value: "user@example.com" } }, password: { password: "password" } })).resolves.toMatchObject({ sessionId: "session-id", sessionToken: "token" });
     expect(mocks.session.createSession.mock.calls[0][0].lifetime).toBeUndefined();
+  });
+
+  it("forwards explicit policy lifetime and device userAgent when creating a session", async () => {
+    mocks.session.createSession.mockResolvedValue(create(CreateSessionResponseSchema, { sessionId: "session-id", sessionToken: "token" }));
+    await zitadel.createSession(
+      { user: { search: { case: "loginName", value: "user" } }, password: { password: "password" } },
+      undefined,
+      { lifetimeMs: 3_600_500, userAgent: { fingerprintId: "fp-1", description: "Chrome · macOS" } },
+    );
+    const req = mocks.session.createSession.mock.calls[0][0];
+    expect(req.lifetime).toMatchObject({ seconds: 3600n, nanos: 500_000_000 });
+    expect(req.userAgent).toMatchObject({ fingerprintId: "fp-1", description: "Chrome · macOS" });
+  });
+
+  it("ignores non-positive lifetimes on createSession", async () => {
+    mocks.session.createSession.mockResolvedValue(create(CreateSessionResponseSchema, { sessionId: "session-id", sessionToken: "token" }));
+    await zitadel.createSession({ user: { search: { case: "loginName", value: "user" } } }, undefined, { lifetimeMs: 0 });
+    expect(mocks.session.createSession.mock.calls[0][0].lifetime).toBeUndefined();
+  });
+
+  it("revokes only older sessions matching both the same user and device fingerprint", async () => {
+    mocks.session.listSessions.mockResolvedValue(create(ListSessionsResponseSchema, {
+      sessions: [
+        create(SessionSchema, { id: "keep", factors: { user: { id: "user-1" } }, userAgent: { fingerprintId: "fp-1" } }),
+        create(SessionSchema, { id: "old-same-device", factors: { user: { id: "user-1" } }, userAgent: { fingerprintId: "fp-1" } }),
+        create(SessionSchema, { id: "other-device", factors: { user: { id: "user-1" } }, userAgent: { fingerprintId: "fp-2" } }),
+        create(SessionSchema, { id: "other-user", factors: { user: { id: "user-2" } }, userAgent: { fingerprintId: "fp-1" } }),
+      ],
+    }));
+    await zitadel.revokeDeviceSessions("user-1", "fp-1", "keep");
+    expect(mocks.session.deleteSession).toHaveBeenCalledTimes(1);
+    expect(mocks.session.deleteSession).toHaveBeenCalledWith({ sessionId: "old-same-device" });
   });
 });
 

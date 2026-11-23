@@ -15,5 +15,5 @@ export async function inspectIdentityProvider(pending: PendingSession, intent: I
   if (!provider) throw new AuthError("此登录方式当前不可用，请重新选择登录方式。");
   const result = await zitadel.retrieveIdp(intent.idpIntentId, intent.idpIntentToken);
   if (result.idpInformation?.idpId !== provider.id) throw new AuthError("身份提供方与本次登录请求不匹配，请重新开始。");
-  return { provider, result };
+  return { policy, provider, result };
 }
